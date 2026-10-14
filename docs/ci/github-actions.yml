@@ -1,0 +1,36 @@
+name: Android checks and APK
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test -- --runInBand
+      - name: Install pinned SDK packages
+        run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;27.1.12297006'
+      - name: Build evaluation APK with embedded JavaScript
+        working-directory: android
+        run: bash gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: pc-remote-android-evaluation-arm64
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
