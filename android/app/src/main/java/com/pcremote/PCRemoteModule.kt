@@ -84,12 +84,15 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
   private var helloRequestId: String? = null
   private var listenerCount = 0
   @Volatile private var shareListenerReady = false
+  @Volatile private var messageListenerReady = false
   private var reconnectAttempt = 0
   private var reconnectRunnable: Runnable? = null
   @Volatile private var connectionGeneration = 0
   @Volatile private var requestedDisconnect = false
   @Volatile private var foreground = false
   @Volatile private var foregroundSync = false
+  @Volatile private var supportsInput = false
+  @Volatile private var inputResumeBlocked = false
   private var suppressClipText: String? = null
   @Volatile private var pendingRemoteMessage: String? = null
   private var lastClipText: String? = null
@@ -112,8 +115,15 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
   }
   private fun status(value: String) = emit("remote.status", value)
   override fun createId(): String = UUID.randomUUID().toString()
-  override fun addListener(eventName: String) { listenerCount++; if (eventName == "remote.share") shareListenerReady = true }
-  override fun removeListeners(count: Double) { listenerCount = (listenerCount - count.toInt()).coerceAtLeast(0); if (listenerCount == 0) shareListenerReady = false }
+  @Synchronized override fun addListener(eventName: String) {
+    listenerCount++
+    if (eventName == "remote.share") shareListenerReady = true
+    if (eventName == "remote.message") messageListenerReady = true
+  }
+  @Synchronized override fun removeListeners(count: Double) {
+    listenerCount = (listenerCount - count.toInt()).coerceAtLeast(0)
+    if (listenerCount == 0) { shareListenerReady = false; messageListenerReady = false }
+  }
 
   private fun persist(e: PairedComputer) = credentials.persist(e)
   private fun restore(): PairedComputer? = credentials.restore()
@@ -163,7 +173,9 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
     open(false)
   }
   @Synchronized override fun reconnect() {
-    if (socket != null || requestedDisconnect) return
+    // A cold native lifecycle resume can precede JS subscriptions. Do not lose
+    // welcome/state by authenticating before the shared store starts listening.
+    if (!messageListenerReady || socket != null || requestedDisconnect) return
     endpoint = endpoint ?: restore()
     val e = endpoint ?: return
     if (e.token.isBlank()) return
@@ -172,6 +184,7 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
   }
   @Synchronized override fun disconnect() {
     requestedDisconnect = true
+    supportsInput = false
     reconnectRunnable?.let { main.removeCallbacks(it) }
     reconnectRunnable = null
     connectionGeneration++
@@ -184,7 +197,9 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
   }
 
   @Synchronized private fun open(isReconnect: Boolean) {
+    if (!messageListenerReady) return
     val e = endpoint ?: return
+    supportsInput = false
     reconnectRunnable?.let { main.removeCallbacks(it) }
     connectionGeneration++
     val gen = connectionGeneration
@@ -209,7 +224,7 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
           }
         })
         .connectTimeout(8, TimeUnit.SECONDS).pingInterval(20, TimeUnit.SECONDS).build()
-      socket = client!!.newWebSocket(Request.Builder().url("wss://pc-remote.local:${e.port}/v1/ws").build(), object : WebSocketListener() {
+      socket = client!!.newWebSocket(Request.Builder().url("wss://pc-remote.local:${e.port}/v1/ws").header("X-PC-Remote-Features", "input.v1").build(), object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
           if (gen != connectionGeneration) { webSocket.close(1000, null); return }
           val active = endpoint ?: return
@@ -248,6 +263,8 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
               "welcome" -> {
                 if (endpoint?.token.isNullOrBlank() || msg.optString("pcId") != endpoint?.pcId || msg.optString("id") != helloRequestId) { webSocket.close(1002, null); return }
                 helloRequestId = null
+                val capabilities = msg.optJSONArray("capabilities")
+                supportsInput = capabilities != null && (0 until capabilities.length()).any { index -> capabilities.optString(index) == "input.control" }
                 endpoint?.let { persist(it) }
                 reconnectAttempt = 0; status("connected"); emit("remote.message", text)
               }
@@ -291,6 +308,7 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
   }
   @Synchronized private fun lost(gen: Int) {
     if (gen != connectionGeneration) return
+    supportsInput = false
     pendingRemoteMessage = null
     socket = null
     if (requestedDisconnect) return
@@ -301,9 +319,21 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
     reconnectRunnable = Runnable { reconnectRunnable = null; if (foreground && !requestedDisconnect) open(true) }
     main.postDelayed(reconnectRunnable!!, delay)
   }
-  override fun sendRequest(id: String, actionJson: String) {
+  @Synchronized override fun sendRequest(id: String, actionJson: String) {
     if (actionJson.toByteArray(Charsets.UTF_8).size > 524_000 || !id.matches(Regex("[a-fA-F0-9-]{36}"))) return
-    try { socket?.send(JSONObject().put("v", 1).put("type", "request").put("id", id).put("action", JSONObject(actionJson)).toString()) }
+    try {
+      val action = JSONObject(actionJson)
+      val kind = action.optString("kind")
+      val isInput = kind == "input.enable" || kind.startsWith("pointer.") || kind.startsWith("keyboard.")
+      val disabling = kind == "input.enable" && action.optBoolean("enabled", true) == false
+      if (isInput && (!supportsInput || ((!foreground || inputResumeBlocked) && !disabling))) {
+        emit("remote.message", JSONObject().put("v", 1).put("type", "error").put("id", id)
+          .put("code", "unavailable").put("message", "Abra o aplicativo e ative novamente o controle de entrada.")
+          .put("retryable", false).toString())
+        return
+      }
+      socket?.send(JSONObject().put("v", 1).put("type", "request").put("id", id).put("action", action).toString())
+    }
     catch (_: Exception) { status("error:Comando inválido.") }
   }
 
@@ -339,6 +369,11 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
         lastClipText = try { clipboard.primaryClip?.getItemAt(0)?.text?.toString() } catch (_: Exception) { null }
       }
     }
+  }
+  @Synchronized override fun acknowledgeInputResume() {
+    // JS invokes this only after discarding input from the previous lifecycle.
+    // Native resume can precede window focus; input has its own lifecycle gate.
+    if (foreground) inputResumeBlocked = false
   }
   private fun onClipboardChanged() {
     if (!foreground || !foregroundSync || getCurrentActivity()?.hasWindowFocus() != true) return
@@ -419,14 +454,17 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
       .setContentText("Abra o PC Remote para copiar.").setContentIntent(pending).setAutoCancel(true).build()
     (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(7, notification)
   }
-  override fun onHostResume() {
+  @Synchronized override fun onHostResume() {
     foreground = true
     lastClipText = try { if (clipboard.primaryClipDescription?.hasMimeType(android.content.ClipDescription.MIMETYPE_TEXT_PLAIN) == true) clipboard.primaryClip?.getItemAt(0)?.text?.toString() else null } catch (_: Exception) { null }
     pendingRemoteMessage?.let { emit("remote.backgroundClipboard", it); pendingRemoteMessage = null }
     reconnect()
     if (!requestedDisconnect && (endpoint ?: restore())?.token?.isNotBlank() == true) startDiscovery()
   }
-  override fun onHostPause() { foreground = false; foregroundSync = false }
-  override fun onHostDestroy() { foreground = false; foregroundSync = false; stopDiscovery() }
+  private fun disableNativeInput() {
+    if (supportsInput) sendRequest(UUID.randomUUID().toString(), JSONObject().put("kind", "input.enable").put("enabled", false).toString())
+  }
+  @Synchronized override fun onHostPause() { foreground = false; foregroundSync = false; inputResumeBlocked = true; disableNativeInput() }
+  @Synchronized override fun onHostDestroy() { foreground = false; foregroundSync = false; inputResumeBlocked = true; disableNativeInput(); stopDiscovery() }
   override fun invalidate() { disconnect(); stopDiscovery(); connectivity.unregisterNetworkCallback(networkCallback); clipboard.removePrimaryClipChangedListener(clipboardListener); current = null; super.invalidate() }
 }

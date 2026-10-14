@@ -1,16 +1,16 @@
 # PC Remote Android
 
-Aplicativo Android nativo em React Native + TypeScript para controlar o PC na LAN. Este repositório é independente do `pc-remote-desktop`. Versão 0.1.0, protocolo 1. Não usa WebView, Expo Go, nuvem, login, root, ADB ou acessibilidade para operar.
+Aplicativo Android nativo em React Native + TypeScript para controlar o PC na LAN. Este repositório é independente do `pc-remote-desktop`. Versão 0.2.0, protocolo 1. Não usa WebView, Expo Go, nuvem, login, root, ADB ou acessibilidade para operar.
 
-## Baixar e instalar — versão 0.1.0
+## Baixar e instalar — versão 0.2.0
 
 | Aplicativo | Download |
 |---|---|
-| Android ARM64 — celular compatível | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.1.0/pc-remote-android-0.1.0-arm64-evaluation.apk) |
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.1.0/pc-remote-desktop-0.1.0-x64-setup.exe) |
-| Android x86_64 — emulador | [Baixar APK para emulador](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.1.0/pc-remote-android-0.1.0-x86_64-evaluation.apk) |
+| Android ARM64 — celular compatível | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.0/pc-remote-android-0.2.0-arm64-evaluation.apk) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.2.0/pc-remote-desktop-0.2.0-x64-setup.exe) |
+| Android x86_64 — emulador | [Baixar APK para emulador](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.0/pc-remote-android-0.2.0-x86_64-evaluation.apk) |
 
-Os downloads estão nas Releases privadas: entre no GitHub com uma conta que tenha acesso aos dois repositórios. As páginas de [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.1.0) e [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.1.0) também incluem os hashes SHA-256.
+Os downloads estão nas Releases privadas: entre no GitHub com uma conta que tenha acesso aos dois repositórios. As páginas de [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.2.0) e [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.2.0) também incluem os hashes SHA-256.
 
 Instale o `.exe` no Windows e abra o PC Remote pela bandeja. No celular, abra o APK ARM64 pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte ambos à mesma rede local, inicie o pareamento no PC, escaneie o QR ou informe os dados exibidos e confirme o pedido no Windows. Os aplicativos instalados não precisam de Metro, Expo Go ou ferramentas de desenvolvimento.
 
@@ -63,6 +63,16 @@ Android 10+ não permite ler clipboard de outros apps em segundo plano. Abra o P
 Texto até **64 KiB UTF-8**, preservando acentos, emojis e quebras; NUL é rejeitado. Texto marcado `EXTRA_IS_SENSITIVE` é bloqueado; a plataforma não marca todas as senhas. Não existe sincronização de imagens/arquivos, abertura automática de links, colagem em aplicativos ou execução remota de comandos.
 
 Veja [protocolo](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [compatibilidade de mídia](docs/MEDIA-COMPATIBILITY.md) e [testes/pendências](docs/TESTING.md).
+
+## Touchpad e teclado remoto
+
+1. No Windows, abra **Preferências → Mouse e teclado** e habilite **Permitir mouse e teclado pelo celular**. A opção começa desligada.
+2. No Android, abra **Touchpad e teclado** e toque em **Ativar controle** nesta conexão.
+3. Arraste no touchpad para mover o cursor; toque para clicar. Botões separados oferecem clique direito, clique duplo e rolagem. Digite no campo de texto e envie explicitamente, ou use as teclas comuns.
+4. O alvo é o aplicativo em foco no Windows. Selecione a janela desejada antes de enviar texto. O controle não exibe a tela do PC.
+5. Para interromper, desative no celular, na Visão geral do Windows ou no menu da bandeja. Bloquear a permissão no PC também interrompe o controle.
+
+A ativação é descartada ao desconectar, suspender ou colocar o Android em segundo plano. É necessário ativar novamente; movimentos, cliques e textos pendentes não são repetidos. Texto digitado fica somente em RAM e não entra em logs/histórico. O limite por envio é **1.024 bytes UTF-8**, sem caracteres de controle; use os botões Enter e Tab para essas teclas. Aplicativos elevados, tela de bloqueio/UAC e algumas interfaces podem recusar entrada. Teclas físicas pressionadas no PC podem interferir. Veja [INPUT.md](docs/INPUT.md) para detalhes e validações.
 
 ## Integração contínua
 

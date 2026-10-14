@@ -1,6 +1,7 @@
 import {AppState, NativeEventEmitter} from 'react-native';
 import NativePCRemote from '../integrations/NativePCRemote';
-import {parseIncoming, textIsAllowed, type Action, type Session, type State} from '../domain/protocol';
+import {inputTextIsAllowed, parseIncoming, textIsAllowed, type Action, type Session, type State} from '../domain/protocol';
+import {InputMotion} from './InputMotion';
 
 export type RemoteView = {
   status: 'desconectado' | 'conectando' | 'pareando' | 'aguardando aprovação' | 'conectado' | 'reconectando';
@@ -17,6 +18,9 @@ export type RemoteView = {
   haptics: boolean;
   foreground: boolean;
   draggingVolume: number | null;
+  inputFeature: boolean;
+  inputArmed: boolean;
+  inputActivating: boolean;
 };
 
 type Listener = () => void;
@@ -33,7 +37,10 @@ export class RemoteStore {
   private dragGeneration = 0;
   private finalVolume: {value: number; gen: number; drag: number; baseRevision: number; acked: boolean} | null = null;
   private alive = false;
-  snapshot: RemoteView = {status: 'desconectado', pcName: '', error: '', state: null, selectedSessionId: '', receivedText: '', sharedText: '', upload: false, download: false, paused: false, autoApply: false, haptics: true, foreground: true, draggingVolume: null};
+  private inputGeneration = 0;
+  private inputDiscretePending = false;
+  snapshot: RemoteView = {status: 'desconectado', pcName: '', error: '', state: null, selectedSessionId: '', receivedText: '', sharedText: '', upload: false, download: false, paused: false, autoApply: false, haptics: true, foreground: true, draggingVolume: null, inputFeature: false, inputArmed: false, inputActivating: false};
+  private motion = new InputMotion(action => this.request(action), () => this.canSendInput(), error => this.patch({error: error.message}));
 
   subscribe = (listener: Listener) => {this.listeners.add(listener); return () => {this.listeners.delete(listener);};};
   getSnapshot = () => this.snapshot;
@@ -51,9 +58,10 @@ export class RemoteStore {
     emitter.addListener('remote.feedback', value => this.patch({error: value as string}));
     AppState.addEventListener('change', next => {
       const foreground = next === 'active';
+      if (!foreground) {this.disableInput();}
       this.patch({foreground});
       NativePCRemote.setForegroundSync(foreground && this.snapshot.upload && !this.snapshot.paused);
-      if (foreground) {NativePCRemote.reconnect();}
+      if (foreground) {this.dropInput(); NativePCRemote.acknowledgeInputResume(); NativePCRemote.reconnect();}
     });
     NativePCRemote.getPreferences().then(raw => {
       const value = JSON.parse(raw) as Partial<Pick<RemoteView, 'upload' | 'download' | 'paused' | 'autoApply' | 'haptics'>>;
@@ -65,6 +73,7 @@ export class RemoteStore {
     NativePCRemote.getSharedText().then(text => {if (text) {this.onShared(text);}}).catch(() => undefined);
     NativePCRemote.getPendingRemoteMessage().then(text => {if (text) {this.onMessage(text, false);}}).catch(() => undefined);
     NativePCRemote.getPendingFeedback().then(text => {if (text) {this.patch({error: text});}}).catch(() => undefined);
+    NativePCRemote.acknowledgeInputResume();
   }
 
   private onStatus(status: string) {
@@ -72,8 +81,8 @@ export class RemoteStore {
     if (status === 'pending') {this.patch({status: 'aguardando aprovação'}); return;}
     if (status === 'pairing') {this.patch({status: 'pareando'}); return;}
     if (status === 'connecting' || status === 'reconnecting') {this.patch({status: status === 'connecting' ? 'conectando' : 'reconectando'}); return;}
-    if (status.startsWith('error:')) {this.patch({status: 'desconectado', error: status.slice(6)}); this.rejectPending(); return;}
-    if (status === 'disconnected') {this.patch({status: 'desconectado', state: null, receivedText: '', draggingVolume: null}); this.rejectPending();}
+    if (status.startsWith('error:')) {this.dropInput(); this.patch({status: 'desconectado', error: status.slice(6)}); this.rejectPending(); return;}
+    if (status === 'disconnected') {this.dropInput(); this.patch({status: 'desconectado', state: null, receivedText: '', draggingVolume: null}); this.rejectPending();}
   }
 
   private rejectPending() {for (const p of this.pending.values()) {clearTimeout(p.timer); p.reject(new Error('Conexão interrompida.'));} this.pending.clear(); if (this.delayedVolume) {clearTimeout(this.delayedVolume); this.delayedVolume = null;} this.finalVolume = null; this.dragGeneration++; this.generation++;}
@@ -81,13 +90,17 @@ export class RemoteStore {
   private onMessage(raw: string, allowAutoApply = true) {
     const msg = parseIncoming(raw);
     if (!msg) {this.patch({error: 'Resposta inválida do computador.'}); return;}
-    if (msg.type === 'welcome') {this.generation++; this.eventIds.clear(); this.lastClipboardEventRevision = -1; this.observedClipboardRevision = 0; this.finalVolume = null; this.patch({status: 'conectado', pcName: msg.pcName, state: null, receivedText: '', draggingVolume: null}); this.request({kind: 'state.get'}).catch(() => undefined); this.sendSync(); return;}
+    if (msg.type === 'welcome') {this.dropInput(); this.generation++; this.eventIds.clear(); this.lastClipboardEventRevision = -1; this.observedClipboardRevision = 0; this.finalVolume = null; this.patch({status: 'conectado', pcName: msg.pcName, state: null, receivedText: '', draggingVolume: null, inputFeature: msg.capabilities.includes('input.control')}); this.request({kind: 'state.get'}).catch(() => undefined); this.sendSync(); return;}
     if (msg.type === 'state') {
       const prev = this.snapshot.state;
       if (prev && msg.revision < prev.revision) {return;}
       if (prev && msg.revision === prev.revision && !this.finalVolume?.acked) {return;}
       const sessionId = msg.media.sessions.some(s => s.id === this.snapshot.selectedSessionId) ? this.snapshot.selectedSessionId : (msg.media.sessions[0]?.id ?? '');
       this.observedClipboardRevision = Math.max(this.observedClipboardRevision, msg.clipboardRevision);
+      // A queued disabled snapshot from the previous lifecycle can arrive while
+      // a fresh enable request is pending. It cannot cancel the user's new intent;
+      // permission revocation and disabling an already armed session still do.
+      if (msg.input && (!msg.input.allowed || (!msg.input.enabled && this.snapshot.inputArmed))) {this.dropInput();}
       const final = this.finalVolume;
       if (final && final.acked && final.gen === this.generation && final.drag === this.dragGeneration && msg.audio.percent === final.value) {
         this.finalVolume = null;
@@ -128,11 +141,12 @@ export class RemoteStore {
   }
 
   connect(host: string, port: number, fingerprint: string, code: string) {
+    this.dropInput();
     this.rejectPending();
     this.patch({status: 'pareando', error: '', state: null, receivedText: '', draggingVolume: null});
     NativePCRemote.connect(host.trim(), port, fingerprint.trim().toLowerCase().replaceAll(':', ''), code.trim(), 'Celular Android');
   }
-  disconnect() {NativePCRemote.disconnect(); this.rejectPending(); this.patch({status: 'desconectado', state: null, receivedText: '', draggingVolume: null});}
+  disconnect() {this.dropInput(); NativePCRemote.disconnect(); this.rejectPending(); this.patch({status: 'desconectado', state: null, receivedText: '', draggingVolume: null});}
   forget() {this.disconnect(); NativePCRemote.forgetComputer(); this.patch({pcName: '', receivedText: ''});}
   selectSession(id: string) {this.patch({selectedSessionId: id});}
   get selectedSession(): Session | undefined {return this.snapshot.state?.media.sessions.find(s => s.id === this.snapshot.selectedSessionId);}
@@ -166,6 +180,40 @@ export class RemoteStore {
   setHaptics(enabled: boolean) {this.patch({haptics: enabled}); this.persistPreferences();}
   private persistPreferences() {const {upload, download, paused, autoApply, haptics} = this.snapshot; NativePCRemote.savePreferences(JSON.stringify({upload, download, paused, autoApply, haptics}));}
   private sendSync() {if (this.snapshot.status === 'conectado') {const {upload, download, paused} = this.snapshot; this.request({kind: 'sync.set', upload, download, paused}).catch(() => undefined);}}
+
+  private canSendInput() {
+    const {status, foreground, inputFeature, inputArmed, state} = this.snapshot;
+    return status === 'conectado' && foreground && inputFeature && inputArmed && state?.input?.allowed === true && state.input.enabled === true;
+  }
+  private dropInput() {this.inputGeneration++; this.inputDiscretePending = false; this.motion.cancel(); if (this.snapshot.inputArmed || this.snapshot.inputActivating) {this.patch({inputArmed: false, inputActivating: false});}}
+  disableInput() {
+    const wasArmed = this.snapshot.inputArmed || this.snapshot.inputActivating;
+    this.dropInput();
+    if (wasArmed && this.snapshot.status === 'conectado') {this.request({kind: 'input.enable', enabled: false}).catch(() => undefined);}
+  }
+  async enableInput() {
+    if (this.snapshot.status !== 'conectado' || !this.snapshot.foreground || !this.snapshot.inputFeature || this.snapshot.state?.input?.allowed !== true) {throw new Error('Controle de entrada indisponível neste PC.');}
+    if (this.snapshot.inputActivating) {return;}
+    const generation = this.inputGeneration;
+    this.patch({inputActivating: true});
+    try {
+      await this.request({kind: 'input.enable', enabled: true});
+      if (generation !== this.inputGeneration || this.snapshot.status !== 'conectado' || !this.snapshot.foreground || this.snapshot.state?.input?.enabled !== true) {return;}
+      this.patch({inputArmed: true});
+      await this.request({kind: 'state.get'});
+    } finally {if (generation === this.inputGeneration) {this.patch({inputActivating: false});}}
+  }
+  movePointer(dx: number, dy: number) {this.motion.move(dx, dy);}
+  cancelPointerMotion() {this.motion.cancel();}
+  async inputAction(action: Extract<Action, {kind: 'pointer.click' | 'pointer.scroll' | 'keyboard.key' | 'keyboard.text'}>) {
+    if (!this.canSendInput()) {throw new Error('Ative o controle de entrada no PC e no celular.');}
+    if (this.inputDiscretePending) {throw new Error('Aguarde a confirmação do controle anterior.');}
+    if (action.kind === 'keyboard.text' && !inputTextIsAllowed(action.text)) {throw new Error('Digite de 1 a 1024 bytes de texto, sem quebras de linha ou caracteres de controle.');}
+    const generation = this.inputGeneration;
+    this.inputDiscretePending = true;
+    try {await this.request(action); if (generation !== this.inputGeneration) {throw new Error('Controle interrompido.');}}
+    finally {if (generation === this.inputGeneration) {this.inputDiscretePending = false;}}
+  }
 
   beginVolume(value: number) {this.dragGeneration++; this.finalVolume = null; this.patch({draggingVolume: value}); this.throttleVolume(value);}
   updateVolume(value: number) {this.patch({draggingVolume: value}); this.throttleVolume(value);}

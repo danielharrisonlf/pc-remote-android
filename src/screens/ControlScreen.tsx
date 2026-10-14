@@ -1,4 +1,4 @@
-import React, {useEffect, useState, useSyncExternalStore} from 'react';
+import React, {useCallback, useEffect, useState, useSyncExternalStore} from 'react';
 import {Alert, BackHandler, KeyboardAvoidingView, PermissionsAndroid, Platform, Pressable, ScrollView, StatusBar, Text, useColorScheme, Vibration, View} from 'react-native';
 import Slider from '@react-native-community/slider';
 import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
@@ -7,6 +7,7 @@ import {remote} from '../communication/remote';
 import type {Action} from '../domain/protocol';
 import {Button, Card, Field, Setting} from '../components/Controls';
 import {SessionControls} from '../components/SessionControls';
+import {InputControls} from '../components/InputControls';
 import {Pairing} from './PairingScreen';
 import {light, dark, styles} from '../theme/theme';
 
@@ -25,7 +26,7 @@ export default function ControlScreen() {
   useEffect(() => {if (settings) {NativePCRemote.getSavedComputer().then(raw => {if (raw) {const saved = JSON.parse(raw) as {host: string; port: number}; setAddressHost(saved.host); setAddressPort(String(saved.port));}}).catch(() => undefined);}}, [settings]);
   useEffect(() => {const sub = BackHandler.addEventListener('hardwareBackPress', () => {if (pairing) {setPairing(false); return true;} if (settings) {setSettings(false); return true;} return false;}); return () => sub.remove();}, [pairing, settings]);
   useEffect(() => {if (feedback) {const timer = setTimeout(() => setFeedback(''), 3000); return () => clearTimeout(timer);}}, [feedback]);
-  const confirmed = () => {setFeedback('Ação confirmada pelo PC.'); if (haptics) {Vibration.vibrate(18);}};
+  const confirmed = useCallback(() => {setFeedback('Ação confirmada pelo PC.'); if (haptics) {Vibration.vibrate(18);}}, [haptics]);
   const action = (a: Action) => {remote.request(a).then(confirmed).catch(error => Alert.alert('Ação indisponível', String(error.message)));};
   const asyncAction = (task: () => Promise<void>) => {task().then(confirmed).catch(error => Alert.alert('Não foi possível concluir', String(error.message)));};
   const volume = view.draggingVolume ?? view.state?.audio.percent ?? 0;
@@ -58,6 +59,7 @@ export default function ControlScreen() {
         <View style={styles.row}><Button label="Copiar texto recebido" onPress={() => {remote.copyReceived().then(() => {setFeedback('Texto copiado no celular.'); if (haptics) {Vibration.vibrate(18);}}).catch(error => Alert.alert('Área de transferência', String(error.message)));}} disabled={!view.receivedText} secondary palette={palette} /></View>
         <Text style={[styles.hint, {color: palette.soft}]}>Para enviar cópias de outros apps, abra o PC Remote ou use Compartilhar. O Android limita a leitura automática em segundo plano.</Text>
       </Card>
+      <InputControls view={view} palette={palette} confirmed={confirmed} />
       {settings ? <Card title="Configurações" palette={palette}>
         <Field label="Endereço do PC pareado" value={addressHost} onChange={setAddressHost} palette={palette} />
         <Field label="Porta" value={addressPort} onChange={setAddressPort} palette={palette} numeric />

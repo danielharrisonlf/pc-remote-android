@@ -19,6 +19,7 @@ export interface Spec extends TurboModule {
   getPendingRemoteMessage(): Promise<string>;
   getPendingFeedback(): Promise<string>;
   setForegroundSync(enabled: boolean): void;
+  acknowledgeInputResume(): void;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
   createId(): string;
