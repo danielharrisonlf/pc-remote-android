@@ -2,6 +2,20 @@
 
 Aplicativo Android nativo em React Native + TypeScript para controlar o PC na LAN. Este repositório é independente do `pc-remote-desktop`. Versão 0.1.0, protocolo 1. Não usa WebView, Expo Go, nuvem, login, root, ADB ou acessibilidade para operar.
 
+## Baixar e instalar — versão 0.1.0
+
+| Aplicativo | Download |
+|---|---|
+| Android ARM64 — celular compatível | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.1.0/pc-remote-android-0.1.0-arm64-evaluation.apk) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.1.0/pc-remote-desktop-0.1.0-x64-setup.exe) |
+| Android x86_64 — emulador | [Baixar APK para emulador](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.1.0/pc-remote-android-0.1.0-x86_64-evaluation.apk) |
+
+Os downloads estão nas Releases privadas: entre no GitHub com uma conta que tenha acesso aos dois repositórios. As páginas de [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.1.0) e [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.1.0) também incluem os hashes SHA-256.
+
+Instale o `.exe` no Windows e abra o PC Remote pela bandeja. No celular, abra o APK ARM64 pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte ambos à mesma rede local, inicie o pareamento no PC, escaneie o QR ou informe os dados exibidos e confirme o pedido no Windows. Os aplicativos instalados não precisam de Metro, Expo Go ou ferramentas de desenvolvimento.
+
+Esta é uma versão de avaliação: APK assinado com chave debug e instalador sem Authenticode. A validação em celular físico e players reais permanece pendente; consulte [testes e limitações](docs/TESTING.md).
+
 ## Escolha da arquitetura
 
 React Native **0.87.1**, React **19.2.3**, Community CLI **20.2.0**, New Architecture e Hermes, verificados no registro npm em 14/10/2026. O Expo estável **57.0.28** acompanha RN 0.86, enquanto SDK 58 ainda está no canal `next`. Expo development build com módulo local seria viável; escolhemos Community CLI para manter a versão estável atual do RN sem misturar versões incompatíveis. Kotlin fornece o transporte com identidade TLS fixada, armazenamento Keystore e integrações que precisam acessar flags e ciclo de vida nativos. Interface e regras de interação continuam em React Native/TypeScript estrito.
