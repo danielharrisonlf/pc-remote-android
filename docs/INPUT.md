@@ -1,6 +1,6 @@
 # Mouse e teclado — input.v1
 
-O controle usa componentes nativos React Native no Android e `SendInput` da crate windows no Rust. Não exige novas bibliotecas Android, acessibilidade, root nem permissões de administrador no PC. A conexão conserva o TLS e as credenciais individuais do pareamento.
+Nesta branch, o controle usa Views nativas Kotlin no Android e `SendInput` da crate windows no Rust. Não exige novas bibliotecas Android, acessibilidade, root nem permissões de administrador no PC. A conexão conserva o TLS e as credenciais individuais do pareamento.
 
 ## Permissão e alvo
 
@@ -14,7 +14,7 @@ Texto tem limite de 1.024 bytes UTF-8 por envio, sem controles; emoji e acentos 
 
 SendInput pode ser bloqueado por UIPI: um processo normal não controla automaticamente aplicativos elevados, tela de bloqueio ou desktop protegido do UAC. A API não identifica com segurança qual bloqueio causou a falha. O backend compara a quantidade de eventos injetados com o lote esperado e responde erro sem retry. Não execute o PC Remote como administrador para contornar essas restrições. Jogos, campos especiais e aplicativos podem não aceitar entrada Unicode. Teclas físicas mantidas no PC podem interferir.
 
-Fontes oficiais: [SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput), [KEYBDINPUT](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-keybdinput), [PanResponder](https://reactnative.dev/docs/panresponder).
+Fontes oficiais: [SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput), [KEYBDINPUT](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-keybdinput), [MotionEvent Android](https://developer.android.com/reference/android/view/MotionEvent).
 
 ## Validação
 
