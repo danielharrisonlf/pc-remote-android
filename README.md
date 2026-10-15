@@ -16,7 +16,7 @@ Instale o `.exe` no PC e abra o APK pelo gerenciador de arquivos do celular, aut
 
 ## Tamanho
 
-**APK final: 595241 bytes (0.595 MB), aproximadamente 97.1% menor que os 20.20 MB do React Native entregue.** Sem R8: 2.404 MB.
+**APK final: 597017 bytes (0.597 MB), aproximadamente 97.0% menor que os 20.20 MB do React Native entregue.** Sem R8: 2.406 MB.
 
 Veja [SIZE.md](docs/SIZE.md) para bytes exatos, hashes e comparação das builds Kotlin com e sem R8 e do APK React Native entregue. O tamanho do download difere do espaço instalado e do consumo de RAM. O scanner QR opcional pode baixar módulos externos do Google Play Services, que não fazem parte do APK.
 

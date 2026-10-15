@@ -40,8 +40,10 @@ class MainActivity : Activity() {
     private var page = Page.HOME
     private var rendering = false
     private var lastSharedText = ""
+    private var qrError = ""
     private var selectedSessionIds = emptyList<String>()
-    private var backCallback: android.window.OnBackInvokedCallback? = null
+    private var unregisterBack: (() -> Unit)? = null
+    private val qrScanner = QrScanner()
 
     private lateinit var root: LinearLayout
     private lateinit var home: LinearLayout
@@ -102,11 +104,7 @@ class MainActivity : Activity() {
         client.receiveShare(intent)
         if (state.status == "Desconectado" && client.savedAddress() == null) page = Page.PAIR
         render()
-        if (Build.VERSION.SDK_INT >= 33) {
-            val callback = android.window.OnBackInvokedCallback { runOnUiThread { navigateBack() } }
-            onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback)
-            backCallback = callback
-        }
+        unregisterBack = BackNavigation.register(this) { navigateBack() }
     }
 
     override fun onResume() {
@@ -125,7 +123,9 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-        if (Build.VERSION.SDK_INT >= 33) backCallback?.let { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(it) }
+        unregisterBack?.invoke()
+        unregisterBack = null
+        qrScanner.detach()
         unsubscribe?.invoke()
         unsubscribe = null
         super.onDestroy()
@@ -340,10 +340,17 @@ class MainActivity : Activity() {
         pairError = label("", 14f).apply { setTextColor(Palette.error) }; pair.addView(pairError)
         pair.addView(card().apply {
             addView(button("Ler QR code") {
-                client.scanQr(this@MainActivity) { invite, problem ->
-                    runOnUiThread {
-                        if (problem != null) toast(problem)
-                        if (invite != null) fillInvite(invite)
+                qrError = ""
+                qrScanner.start(this@MainActivity) { invite, problem ->
+                    if (problem != null) {
+                        qrError = problem
+                        render()
+                        toast(problem)
+                    }
+                    if (invite != null) {
+                        qrError = ""
+                        fillInvite(invite)
+                        render()
                     }
                 }
             })
@@ -352,6 +359,7 @@ class MainActivity : Activity() {
             pairFingerprint = edit("Impressão digital do certificado", false); addView(pairFingerprint)
             pairCode = edit("Código de pareamento", false).apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER }; addView(pairCode)
             addView(button("Solicitar pareamento") {
+                qrError = ""
                 val port = pairPort.text.toString().toIntOrNull()
                 if (pairHost.text.isBlank() || port == null || port !in 1..65535 || pairFingerprint.text.isBlank() || pairCode.text.isBlank()) {
                     toast("Preencha endereço, porta, impressão digital e código válidos"); return@button
@@ -422,8 +430,9 @@ class MainActivity : Activity() {
         pcName.text = state.pcName.ifBlank { "Nenhum PC" }
         status.text = state.status
         pairStatus.text = state.status
-        pairError.text = state.error
-        pairError.visibility = if (state.error.isBlank()) View.GONE else View.VISIBLE
+        val pairingProblem = qrError.ifBlank { state.error }
+        pairError.text = pairingProblem
+        pairError.visibility = if (pairingProblem.isBlank()) View.GONE else View.VISIBLE
         error.text = state.error
         error.visibility = if (state.error.isBlank()) View.GONE else View.VISIBLE
         reconnect.isEnabled = !connected && client.savedAddress() != null

@@ -27,7 +27,13 @@ internal class CredentialStore(private val prefs: SharedPreferences) {
     val cipher = Cipher.getInstance("AES/GCM/NoPadding")
     cipher.init(Cipher.ENCRYPT_MODE, key())
     val blob = cipher.iv + cipher.doFinal(value)
-    prefs.edit().putString("credential", Base64.encodeToString(blob, Base64.NO_WRAP)).apply()
+    // Pairing must only proceed when the encrypted credential reached disk.
+    if (!prefs.edit().putString("credential", Base64.encodeToString(blob, Base64.NO_WRAP)).commit())
+      throw IllegalStateException("Could not save encrypted credential")
+  }
+  fun clear() {
+    if (!prefs.edit().remove("credential").commit())
+      throw IllegalStateException("Could not remove encrypted credential")
   }
   fun restore(): PairedComputer? {
     val blob = prefs.getString("credential", null) ?: return null

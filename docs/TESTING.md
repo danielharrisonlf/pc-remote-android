@@ -2,6 +2,15 @@
 
 Registro da alternativa 0.2.0-kotlin em 14/10/2026. Os resultados React Native da branch main não são apresentados como testes desta implementação. Integrações reais: Android SDK/Keystore/OkHttp e Windows Rust/Core Audio/GSMTC/clipboard/SendInput. Não há simulações no produto.
 
+## Atualização 0.2.2-kotlin — leitor QR, ciclo de vida e resiliência de pareamento
+
+- **14 testes JUnit passaram**: 5 de protocolo, 4 de tracking de clipboard e 5 de comportamento do leitor QR (gate único, reuso, detach de Activity destruída, mensagens sem vazamento de exceção e detecção de cancelamento). assembleRelease, assembleSizeBaseline e lintRelease passaram (0 erros, 12 avisos).
+- **Correção de ProGuard/R8**: classes que implementam `ComponentRegistrar` (Google ML Kit / Firebase Components) tiveram seus construtores `<init>()` explicitamente preservados em `proguard-rules.pro`, evitando a remoção por reflexão durante a otimização R8 que causava crash ao tocar em "Ler QR code".
+- **Isolamento de ciclo de vida do leitor**: `QrScanner` e `QrScanGate` garantem execução única por vez, desacoplamento de callbacks em Activities destruídas e mensagens de erro amigáveis sem expor dados internos de credenciais.
+- **Resiliência de credenciais**: persistência de credencial no Keystore agora utiliza `commit()` para escrita síncrona segura; se uma nova tentativa de pareamento falha, o cliente restaura o pareamento do PC anterior em vez de perder a sessão válida.
+- **Proteção de notificações**: disparo de `POST_NOTIFICATIONS` protegido contra `RuntimeException` de permissões em versões Android heterogêneas.
+- **Validação em emulador API 36**: APK de release otimizado instalado e executado; abertura do leitor de QR acionou com sucesso o scanner de código de barras do Google Play Services (`BarcodeScanningActivityProxy`), processando frames da câmera em tempo real sem crash e retornando com segurança para a tela de pareamento ao pressionar Voltar.
+
 ## Atualização 0.2.1-kotlin — clipboard/foco
 
 - **9 testes JUnit passaram**: 5 de protocolo e 4 regressões do tracker. assembleRelease, assembleSizeBaseline e lintRelease passaram (0 erros, 12 avisos). Assinatura de avaliação preservada; APK universal.

@@ -19,7 +19,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.app.NotificationCompat
-import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -63,6 +62,8 @@ class RemoteClient(context: Context) : RemoteController {
   private var requestedDisconnect = false
   private var authenticated = false
   private var pairCode: String? = null
+  private var previousPairEndpoint: PairedComputer? = null
+  private var pairingHandshake = false
   private var pairId: String? = null
   private var helloId: String? = null
   private var attempt = 0
@@ -97,7 +98,9 @@ class RemoteClient(context: Context) : RemoteController {
   init {
     clipboard.addPrimaryClipChangedListener(clipboardListener)
     try { connectivity.registerDefaultNetworkCallback(networkCallback) } catch (_: Exception) {}
-    if(Build.VERSION.SDK_INT>=26) (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(NotificationChannel("clipboard","Texto recebido",NotificationManager.IMPORTANCE_DEFAULT))
+    if(Build.VERSION.SDK_INT>=26) try {
+      (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(NotificationChannel("clipboard","Texto recebido",NotificationManager.IMPORTANCE_DEFAULT))
+    } catch (_: RuntimeException) { /* Clipboard preview remains available in the app. */ }
   }
   private fun run(block:()->Unit) { if(Looper.myLooper()==Looper.getMainLooper()) block() else main.post(block) }
   private fun patch(f:(UiState)->UiState) { view=f(view); listeners.toList().forEach { it(view) } }
@@ -123,8 +126,15 @@ class RemoteClient(context: Context) : RemoteController {
   override fun pair(host:String,port:Int,fingerprint:String,code:String) = run {
     val h=host.trim(); val fp=fingerprint.trim().replace(":","").lowercase()
     if(!addressValid(h,port) || !fp.matches(Regex("[a-f0-9]{64}")) || !code.trim().matches(Regex("[0-9]{8}"))) { fail("Confira endereço, porta, código e fingerprint."); return@run }
+    if(pairingHandshake) {
+      close(false)
+      val restoreError=restoreFailedPair()
+      if(restoreError!=null) { fail(restoreError); return@run }
+    }
+    previousPairEndpoint=endpoint?.takeIf { it.token.isNotBlank() } ?: store.restore()
     close(false)
     requestedDisconnect=false; endpoint=PairedComputer(h,port,fp,UUID.randomUUID().toString(),"Celular Android")
+    pairingHandshake=true
     pairCode=code.trim(); patch { it.copy(status="Pareando",error="",snapshot=null,receivedText="") }; open(false)
   }
   private fun addressValid(host:String,port:Int)=port in 1..65535 && host.matches(Regex("[a-zA-Z0-9.-]{1,253}")) && !host.contains("..")
@@ -135,14 +145,28 @@ class RemoteClient(context: Context) : RemoteController {
     if(endpoint?.token.isNullOrBlank()) return
     pairCode=null; open(true)
   }
-  override fun disconnect() = run { close(true); patch { it.copy(status="Desconectado",snapshot=null,receivedText="",draggingVolume=null) } }
-  override fun forget() = run { close(true); prefs.edit().remove("credential").apply(); endpoint=null; patch { it.copy(status="Desconectado",pcName="",snapshot=null,receivedText="") } }
+  override fun disconnect() = run {
+    close(true)
+    val restoreError=if(pairingHandshake) restoreFailedPair() else null
+    patch { it.copy(status="Desconectado",error=restoreError ?: it.error,snapshot=null,receivedText="",draggingVolume=null) }
+  }
+  override fun forget() = run {
+    try { store.clear() } catch (_:Exception) { fail("Não foi possível remover a credencial protegida. Tente novamente."); return@run }
+    close(true); previousPairEndpoint=null; pairingHandshake=false; endpoint=null
+    patch { it.copy(status="Desconectado",pcName="",snapshot=null,receivedText="") }
+  }
   override fun savedAddress():Pair<String,Int>? = (endpoint ?: store.restore())?.let { it.host to it.port }
   override fun updateAddress(host:String,port:Int,completion:(String?)->Unit) = run {
+    if(pairingHandshake) { completion("Aguarde o pareamento terminar."); return@run }
     val old=endpoint ?: store.restore()
     if(old==null || old.token.isBlank()) { completion("Pareie um PC primeiro."); return@run }
     if(!addressValid(host.trim(),port)) { completion("Endereço ou porta inválida."); return@run }
-    close(false); endpoint=old.copy(host=host.trim().lowercase(),port=port); store.persist(endpoint!!)
+    val updated=old.copy(host=host.trim().lowercase(),port=port)
+    try { store.persist(updated) } catch (_:Exception) {
+      completion("Não foi possível proteger e salvar o endereço. Tente novamente.")
+      return@run
+    }
+    close(false); endpoint=updated
     requestedDisconnect=false; open(true); completion(null)
   }
   private fun close(user:Boolean) {
@@ -150,6 +174,19 @@ class RemoteClient(context: Context) : RemoteController {
     generation++; authenticated=false; clearDisarm(); pairId=null; helloId=null; pairCode=null
     dropInput(); rejectPending(); volumeTask?.let(main::removeCallbacks); volumeTask=null; finalVolumeTimeout?.let(main::removeCallbacks); finalVolumeTimeout=null; finalVolume=null
     socket?.close(1000,"Desconectado"); socket=null; client?.dispatcher?.executorService?.shutdown(); client=null
+  }
+  private fun restoreFailedPair():String? {
+    val previous=previousPairEndpoint
+    val newTokenSaved=!endpoint?.token.isNullOrBlank()
+    pairingHandshake=false; previousPairEndpoint=null
+    if(newTokenSaved) try {
+      if(previous==null) store.clear() else store.persist(previous)
+    } catch (_:Exception) {
+      endpoint=null
+      return "Não foi possível restaurar a credencial anterior. Verifique o armazenamento do celular."
+    }
+    endpoint=previous
+    return null
   }
   private fun open(reconnecting:Boolean) {
     val e=endpoint ?: return
@@ -195,21 +232,34 @@ class RemoteClient(context: Context) : RemoteController {
       is Incoming.PairResult -> {
         if(pairCode==null || msg.id!=pairId) { ws.close(1002,null); return }
         val e=endpoint ?: return
-        endpoint=e.copy(pcId=msg.pcId,pcName=msg.pcName,token=msg.token); store.persist(endpoint!!)
+        val paired=e.copy(pcId=msg.pcId,pcName=msg.pcName,token=msg.token)
+        try { store.persist(paired) } catch (_:Exception) {
+          close(true)
+          restoreFailedPair()
+          patch { it.copy(status="Desconectado",error="Não foi possível proteger e salvar o pareamento. Verifique o armazenamento do celular e tente novamente.",snapshot=null) }
+          return
+        }
+        endpoint=paired
         pairCode=null; pairId=null; val id=UUID.randomUUID().toString(); helloId=id
         ws.send(JSONObject().put("v",1).put("type","hello").put("id",id).put("deviceId",e.deviceId).put("token",msg.token).toString())
       }
       is Incoming.Welcome -> {
         if(helloId!=msg.id || endpoint?.pcId!=msg.pcId || endpoint?.token.isNullOrBlank()) { ws.close(1002,null); return }
-        helloId=null; authenticated=true; attempt=0; events.clear(); clipboardRevision=0; dropInput()
+        helloId=null; pairingHandshake=false; previousPairEndpoint=null; authenticated=true; attempt=0; events.clear(); clipboardRevision=0; dropInput()
         if(hasFocus()) clipboardTracker.baseline(readLocalClipboardOrNull()) else clipboardTracker.suspend()
         patch { it.copy(status="Conectado",error="",pcName=msg.pcName,snapshot=null,receivedText="",inputSupported=msg.input,draggingVolume=null) }
         request(RemoteAction.StateGet) {}; sendSync()
       }
       is Incoming.Error -> if(msg.id==pairId || msg.id==helloId) {
-        if(msg.code=="unauthorized") { prefs.edit().remove("credential").apply(); endpoint=null }
+        val failedPairing=pairingHandshake
+        if(msg.code=="unauthorized" && !failedPairing) {
+          try { store.clear() } catch (_:Exception) { fail("Não foi possível remover a credencial local. Tente novamente.") }
+          endpoint=null
+        }
         val message=when(msg.code) { "pairing_expired"->"Código expirou. Gere outro no PC."; "pairing_denied"->"Pareamento recusado no PC."; "rate_limited"->"Muitas tentativas. Aguarde."; "unauthorized"->"Acesso revogado. Pareie novamente."; "unavailable"->"Outro celular já controla este PC."; else->"Pareamento ou autenticação falhou." }
-        close(true); patch { it.copy(status="Desconectado",error=message) }
+        close(true)
+        val restoreError=if(failedPairing) restoreFailedPair() else null
+        patch { it.copy(status="Desconectado",error=restoreError ?: message) }
       } else if(authenticated) complete(msg.id,msg.message)
       is Incoming.Ack -> if(authenticated) complete(msg.id,null) else ws.close(1002,null)
       is Incoming.State -> if(authenticated) onState(msg.snapshot) else ws.close(1002,null)
@@ -218,8 +268,10 @@ class RemoteClient(context: Context) : RemoteController {
   }
   private fun lost(own:Int) {
     if(own!=generation) return
+    val restoreError=if(pairingHandshake) restoreFailedPair() else null
+    pairCode=null; pairId=null
     authenticated=false; clearDisarm(); socket=null; client?.dispatcher?.executorService?.shutdown(); client=null; dropInput(); rejectPending(); finalVolumeTimeout?.let(main::removeCallbacks); finalVolumeTimeout=null; finalVolume=null
-    patch { it.copy(status="Desconectado",snapshot=null,inputSupported=false,draggingVolume=null) }
+    patch { it.copy(status="Desconectado",error=restoreError ?: it.error,snapshot=null,inputSupported=false,draggingVolume=null) }
     if(requestedDisconnect || !foreground || endpoint?.token.isNullOrBlank()) return
     val delay=intArrayOf(1,2,4,8,16,30)[attempt.coerceAtMost(5)]*1000L+SecureRandom().nextInt(500)
     attempt++; val task=Runnable { reconnectTask=null; if(foreground && !requestedDisconnect) open(true) }; reconnectTask=task; main.postDelayed(task,delay)
@@ -379,11 +431,7 @@ class RemoteClient(context: Context) : RemoteController {
     } catch (_:Exception) { "O Android não permitiu copiar o texto." }
   }
   override fun scanQr(activity:Activity,completion:(Invite?,String?)->Unit) {
-    GmsBarcodeScanning.getClient(activity).startScan().addOnSuccessListener { barcode -> run {
-      val raw=barcode.rawValue
-      val invite=raw?.let(Protocol::parseInvite)
-      completion(invite,if(invite==null) "QR incompatível." else null)
-    } }.addOnFailureListener { run { completion(null,"Não foi possível ler o QR.") } }.addOnCanceledListener { run { completion(null,"Leitura cancelada.") } }
+    QrScanner().start(activity,completion)
   }
   override fun startDiscovery() = run {
     if(discovery!=null) return@run
@@ -413,11 +461,13 @@ class RemoteClient(context: Context) : RemoteController {
   }
   override fun stopDiscovery() = run { discovery?.let { try { nsd.stopServiceDiscovery(it) } catch (_:Exception) {} }; discovery=null; patch { it.copy(discovered=emptyList()) } }
   private fun notifyClipboard() {
-    if(Build.VERSION.SDK_INT>=33 && app.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) return
-    val intent=Intent(app,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-    val pending=PendingIntent.getActivity(app,7,intent,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-    val notification=NotificationCompat.Builder(app,"clipboard").setSmallIcon(R.mipmap.ic_launcher).setContentTitle("Texto recebido do PC").setContentText("Abra o PC Remote para copiar.").setContentIntent(pending).setAutoCancel(true).build()
-    (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(7,notification)
+    try {
+      if(Build.VERSION.SDK_INT>=33 && app.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) return
+      val intent=Intent(app,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+      val pending=PendingIntent.getActivity(app,7,intent,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+      val notification=NotificationCompat.Builder(app,"clipboard").setSmallIcon(R.mipmap.ic_launcher).setContentTitle("Texto recebido do PC").setContentText("Abra o PC Remote para copiar.").setContentIntent(pending).setAutoCancel(true).build()
+      (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(7,notification)
+    } catch (_:RuntimeException) { /* Keep the received text in memory for the next foreground visit. */ }
   }
   override fun beginVolume(value:Int) = run { dragGeneration++; finalVolume=null; finalVolumeTimeout?.let(main::removeCallbacks); finalVolumeTimeout=null; patch { it.copy(draggingVolume=value.coerceIn(0,100)) }; throttleVolume(value) }
   override fun updateVolume(value:Int) = run { patch { it.copy(draggingVolume=value.coerceIn(0,100)) }; throttleVolume(value) }
