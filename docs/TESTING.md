@@ -2,6 +2,24 @@
 
 Registro da alternativa 0.2.0-kotlin em 14/10/2026. Os resultados React Native da branch main não são apresentados como testes desta implementação. Integrações reais: Android SDK/Keystore/OkHttp e Windows Rust/Core Audio/GSMTC/clipboard/SendInput. Não há simulações no produto.
 
+## Atualização 0.2.1-kotlin — clipboard/foco
+
+- **9 testes JUnit passaram**: 5 de protocolo e 4 regressões do tracker. assembleRelease, assembleSizeBaseline e lintRelease passaram (0 erros, 12 avisos). Assinatura de avaliação preservada; APK universal.
+- Reprodução anterior confirmada com bridge do emulador desligada: aplicar A remoto, desabilitar download, copiar B e depois A deixava Windows em B. O novo APK entregou B e A corretamente, com aumento finito da sequência e sem eco.
+- Download com aplicação automática alterou o clipboard Android real para a amostra esperada. Upload bidirecional funcionou; sequência Windows estabilizou após cada ação, sem loop.
+- EXTRA_IS_SENSITIVE real no Android bloqueou upload e envio manual mostrou erro. Formato Windows ExcludeClipboardContentFromMonitorProcessing preservou o clipboard Android; leitura manual exibiu bloqueio pelo PC.
+- Texto de 65.537 bytes foi bloqueado nos dois lados; envio/leitura manual apresentaram limite de 64 KiB. Nenhum conteúdo original entrou em logs.
+- Clipboard Windows ocupado por outro processo com HWND próprio retornou erro visível. Nova leitura explícita sem ocupação limpou o erro.
+- Pausa bloqueou cópias nas duas direções; retomar manteve clipboard anterior sem replay. Home bloqueou upload e a retomada absorveu baseline; somente cópia nova foi enviada.
+- Com o painel desktop fechado, HWND invisível e processo ativo, upload automático continuou atendido pelo backend Rust.
+- A bridge nativa do emulador causava um loop independente do protocolo, ao reescrever conteúdo entre host e Android. Ela foi desativada e o isolamento nos dois sentidos comprovado com aplicativos parados; essa configuração faz parte da reprodução. O produto agora também evita reescrita de texto idêntico.
+- Ganho de foco/reconexão estabelece baseline, perda de foco desarma entrada e suspende tracking. Metadata do ClipData retornado é revalidada para não transferir texto que mudou para sensível entre leituras.
+- Revisão independente aprovou tracker, foco, idempotência, erro sem conteúdo e separação da fixture. DeepSeek não estava disponível; implementação delegada ao modelo herdado, testes a Luna e revisão a Astra.
+
+A [fixture de clipboard](../verification/clipboard-probe/README.md) usa APIs Android reais e é apenas de teste; não integra o APK distribuído. Celular físico, OEM/Doze, câmera QR, Wi-Fi físico e players permanecem pendentes.
+
+## Evidências anteriores — 0.2.0-kotlin
+
 ## Automatizado
 
 | Verificação | Resultado |
@@ -48,7 +66,7 @@ Os testes de movimento e digitação não operaram em aplicativos reais do usuá
 - Câmera/scanner QR real (parser de convite foi automatizado), notificações e permissões reais; Android mínimo API24.
 - Wi-Fi físico/mDNS, mudança de interface/rede/IP e suspensão/retomada física do PC.
 - Players GSMTC reais: múltiplas sessões, play/pause/faixas e seek; mesma matriz MEDIA-COMPATIBILITY.md do desktop, sem promessa universal.
-- Sync automática em ambos os sentidos, flags de sensibilidade reais e clipboard temporariamente ocupado. Regras de dedup/revisão foram testadas; o fluxo integrado executado foi manual.
+- Repetir sync automática, flags de sensibilidade e clipboard ocupado em hardware do usuário; os fluxos reais no emulador/Windows foram ampliados na versão 0.2.1.
 - Arraste rápido/revisões atrasadas em hardware e troca/desconexão de dispositivo de áudio.
 - Entrada Unicode e teclas em diferentes apps/IMEs, clique duplo, roda e bloqueios UIPI/UAC.
 - Encerramento físico/suspensão longa, firewall do usuário e inicialização Windows. O backend desktop é o existente, com verificações próprias no repositório desktop; não foi reimplementado nesta branch.

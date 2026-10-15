@@ -1,22 +1,22 @@
 # PC Remote Android — Kotlin nativo
 
-Versão **0.2.0-kotlin**, branch **native/kotlin**. A branch `main` conserva React Native. Esta alternativa usa Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao mesmo desktop Rust/Tauri pela LAN, com protocolo 1 e extensão `input.v1`.
+Versão **0.2.1-kotlin**, branch **native/kotlin**. A branch `main` conserva React Native. Esta alternativa usa Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao mesmo desktop Rust/Tauri pela LAN, com protocolo 1 e extensão `input.v1`.
 
 ## Baixar e instalar
 
 | Aplicativo | Download |
 |---|---|
-| Android Kotlin — APK universal, Android 7/API24+ | [Baixar APK Kotlin](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.0-kotlin/pc-remote-android-kotlin-0.2.0-evaluation.apk) |
+| Android Kotlin — APK universal, Android 7/API24+ | [Baixar APK Kotlin](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.1-kotlin/pc-remote-android-kotlin-0.2.1-evaluation.apk) |
 | Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.2.0/pc-remote-desktop-0.2.0-x64-setup.exe) |
 | Android React Native — alternativa ARM64 | [Baixar APK React Native](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.0/pc-remote-android-0.2.0-arm64-evaluation.apk) |
 
-Downloads em repositórios privados: entre no GitHub com uma conta autorizada. Veja a [release Kotlin](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.2.0-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.2.0). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
+Downloads em repositórios privados: entre no GitHub com uma conta autorizada. Veja a [release Kotlin](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.2.1-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.2.0). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
 
 Instale o `.exe` no PC e abra o APK pelo gerenciador de arquivos do celular, autorizando a fonte quando solicitado. A versão Kotlin aparece como **PC Remote Kotlin**, pacote `com.pcremote.nativeandroid`, e pode coexistir com React Native. Cada app precisa de pareamento próprio; somente um controlador pode ficar conectado por PC. O uso não requer Metro, Expo Go, root, ADB, acessibilidade ou teclado especial.
 
 ## Tamanho
 
-**APK final: 593853 bytes (0.594 MB), aproximadamente 97.1% menor que os 20.20 MB do React Native entregue.** Sem R8: 2.402 MB.
+**APK final: 595241 bytes (0.595 MB), aproximadamente 97.1% menor que os 20.20 MB do React Native entregue.** Sem R8: 2.404 MB.
 
 Veja [SIZE.md](docs/SIZE.md) para bytes exatos, hashes e comparação das builds Kotlin com e sem R8 e do APK React Native entregue. O tamanho do download difere do espaço instalado e do consumo de RAM. O scanner QR opcional pode baixar módulos externos do Google Play Services, que não fazem parte do APK.
 
@@ -52,6 +52,8 @@ No Windows, habilite **Permitir mouse e teclado pelo celular**. No Android, toqu
 
 ## Documentação e testes
 
-[Arquitetura](docs/ARCHITECTURE.md), [protocolo](docs/PROTOCOL.md), [testes e pendências](docs/TESTING.md). Contrato e exemplos são idênticos aos do desktop. Kotlin 0.2.0 funciona com desktop 0.2.x; desktop 0.1.x conserva volume, mídia e clipboard, sem entrada remota.
+[Arquitetura](docs/ARCHITECTURE.md), [protocolo](docs/PROTOCOL.md), [testes e pendências](docs/TESTING.md). Contrato e exemplos são idênticos aos do desktop. Kotlin 0.2.1 funciona com desktop 0.2.x; desktop 0.1.x conserva volume, mídia e clipboard, sem entrada remota.
 
 O [template CI](docs/ci/github-actions.yml) testa Kotlin, executa lint e gera APK sem Node. A credencial GitHub disponível não tem escopo `workflow`; para ativá-lo, publique em `.github/workflows/build.yml` com autenticação apropriada.
+
+A versão 0.2.1 corrige a recópia de texto recebido, estabelece baseline no ganho de foco, evita escritas idênticas e detalha erros de clipboard. Há uma [fixture opcional de validação](verification/clipboard-probe/README.md), separada do APK distribuído.

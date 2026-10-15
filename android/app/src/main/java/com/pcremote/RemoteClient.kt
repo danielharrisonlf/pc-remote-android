@@ -70,11 +70,9 @@ class RemoteClient(context: Context) : RemoteController {
   private val pending = LinkedHashMap<String, Pending>()
   private data class Pending(val completion:(String?)->Unit,val timeout:Runnable,val generation:Int)
   private val events = ClipboardEvents()
+  private val clipboardTracker = ClipboardTracker()
   private var clipboardRevision = 0L
   private var pendingBackgroundText: String? = null
-  private var lastClipboardText: String? = null
-  private var suppressedText: String? = null
-  private var lastAppliedText: String? = null
   private var volumeAt = 0L
   private var volumeTask: Runnable? = null
   private var dragGeneration = 0
@@ -107,15 +105,21 @@ class RemoteClient(context: Context) : RemoteController {
   override fun observe(listener:(UiState)->Unit):()->Unit { run { listeners.add(listener); listener(view) }; return { run { listeners.remove(listener) } } }
   override fun foreground(activity:Activity) = run {
     this.activity=WeakReference(activity); foreground=true
-    lastClipboardText=readLocalClipboardOrNull()
+    if(hasFocus()) clipboardTracker.baseline(readLocalClipboardOrNull()) else clipboardTracker.suspend()
     pendingBackgroundText?.let { onClipboard(Incoming.Clipboard(UUID.randomUUID().toString(),clipboardRevision,it,false),false); pendingBackgroundText=null }
     autoReconnect(); if(!requestedDisconnect) startDiscovery()
   }
   override fun background() = run {
-    foreground=false; activity.clear(); lastClipboardText=null
+    foreground=false; activity.clear(); clipboardTracker.suspend()
     disableInput(); stopDiscovery()
   }
   private fun hasFocus() = foreground && activity.get()?.hasWindowFocus()==true
+  override fun focusChanged(hasFocus:Boolean) = run {
+    if(!hasFocus) {
+      clipboardTracker.suspend()
+      disableInput()
+    } else if(foreground && hasFocus()) clipboardTracker.baseline(readLocalClipboardOrNull())
+  }
   override fun pair(host:String,port:Int,fingerprint:String,code:String) = run {
     val h=host.trim(); val fp=fingerprint.trim().replace(":","").lowercase()
     if(!addressValid(h,port) || !fp.matches(Regex("[a-f0-9]{64}")) || !code.trim().matches(Regex("[0-9]{8}"))) { fail("Confira endereço, porta, código e fingerprint."); return@run }
@@ -198,6 +202,7 @@ class RemoteClient(context: Context) : RemoteController {
       is Incoming.Welcome -> {
         if(helloId!=msg.id || endpoint?.pcId!=msg.pcId || endpoint?.token.isNullOrBlank()) { ws.close(1002,null); return }
         helloId=null; authenticated=true; attempt=0; events.clear(); clipboardRevision=0; dropInput()
+        if(hasFocus()) clipboardTracker.baseline(readLocalClipboardOrNull()) else clipboardTracker.suspend()
         patch { it.copy(status="Conectado",error="",pcName=msg.pcName,snapshot=null,receivedText="",inputSupported=msg.input,draggingVolume=null) }
         request(RemoteAction.StateGet) {}; sendSync()
       }
@@ -280,21 +285,44 @@ class RemoteClient(context: Context) : RemoteController {
   private fun sendSync() { if(authenticated) { val p=view.preferences; request(RemoteAction.SyncSet(p.upload,p.download,p.paused)) {} } }
   override fun setPreferences(preferences:Preferences) = run {
     prefs.edit().putBoolean("upload",preferences.upload).putBoolean("download",preferences.download).putBoolean("paused",preferences.paused).putBoolean("autoApply",preferences.autoApply).putBoolean("haptics",preferences.haptics).apply()
-    patch { it.copy(preferences=preferences) }; lastClipboardText=if(foreground && preferences.upload && !preferences.paused) readLocalClipboardOrNull() else null; sendSync()
+    patch { it.copy(preferences=preferences) }
+    if(hasFocus() && preferences.upload && !preferences.paused) clipboardTracker.baseline(readLocalClipboardOrNull()) else clipboardTracker.suspend()
+    sendSync()
   }
-  private fun sensitive()=clipboard.primaryClipDescription?.extras?.getBoolean("android.content.extra.IS_SENSITIVE",false)==true
-  private fun readLocalClipboardOrNull():String? = try {
-    if(sensitive() || clipboard.primaryClipDescription?.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)!=true) null
-    else clipboard.primaryClip?.getItemAt(0)?.text?.toString()?.takeIf(Protocol::validText)
-  } catch (_:Exception) { null }
+  private sealed class LocalClipboardRead {
+    data class Text(val value:String):LocalClipboardRead()
+    data object Sensitive:LocalClipboardRead()
+    data object TooLarge:LocalClipboardRead()
+    data object Unavailable:LocalClipboardRead()
+  }
+  private fun readLocalClipboard():LocalClipboardRead { return try {
+    val description=clipboard.primaryClipDescription
+    when {
+      description?.extras?.getBoolean("android.content.extra.IS_SENSITIVE",false)==true -> LocalClipboardRead.Sensitive
+      description?.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)!=true -> LocalClipboardRead.Unavailable
+      else -> {
+        val clip=clipboard.primaryClip
+        // Recheck the returned clip itself: another process may replace it after
+        // primaryClipDescription was read, including with a sensitive sample.
+        if(clip?.description?.extras?.getBoolean("android.content.extra.IS_SENSITIVE",false)==true)
+          return LocalClipboardRead.Sensitive
+        if(clip?.description?.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)!=true)
+          return LocalClipboardRead.Unavailable
+        val text=if(clip.itemCount>0) clip.getItemAt(0).text?.toString() else null
+        when {
+          text==null -> LocalClipboardRead.Unavailable
+          Protocol.validText(text) -> LocalClipboardRead.Text(text)
+          text.length>65536 || text.toByteArray(Charsets.UTF_8).size>65536 -> LocalClipboardRead.TooLarge
+          else -> LocalClipboardRead.Unavailable
+        }
+      }
+    }
+  } catch (_:Exception) { LocalClipboardRead.Unavailable } }
+  private fun readLocalClipboardOrNull():String? = (readLocalClipboard() as? LocalClipboardRead.Text)?.value
   private fun localClipboardChanged() {
     if(!hasFocus() || !view.preferences.upload || view.preferences.paused) return
-    val text=readLocalClipboardOrNull() ?: return
-    if(text==suppressedText) { suppressedText=null; lastClipboardText=text; return }
-    if(text==lastClipboardText) return
-    lastClipboardText=text
-    if(text==lastAppliedText) { lastAppliedText=null; return }
-    if(text.isNotEmpty()) sendText(text,true) {}
+    val text=clipboardTracker.observe(readLocalClipboardOrNull()) ?: return
+    sendText(text,true) {}
   }
   private fun sendText(text:String,automatic:Boolean,completion:(String?)->Unit) {
     if(!Protocol.validText(text)) { completion("Texto acima de 64 KiB ou inválido."); return }
@@ -305,17 +333,36 @@ class RemoteClient(context: Context) : RemoteController {
     val text=intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: return@run
     if(!Protocol.validText(text)) fail("Texto compartilhado inválido ou maior que 64 KiB.") else patch { it.copy(sharedText=text) }
   }
+  private fun clipboardFailure(message:String,completion:(String?)->Unit) {
+    fail(message)
+    completion(message)
+  }
+  private fun clipboardRequestError(error:String,sending:Boolean):String = when(error) {
+    "Área de transferência ocupada" -> "Área de transferência do PC ocupada. Tente novamente."
+    "Texto excede 64 KiB", "Texto acima de 64 KiB ou inválido." -> "Texto excede o limite de 64 KiB."
+    "Conteúdo marcado como sensível" -> "Conteúdo marcado como sensível pelo PC."
+    "Computador desconectado.", "Conexão interrompida." -> error
+    else -> if(sending) "Não foi possível enviar o texto para o PC." else "Não foi possível copiar o texto do PC."
+  }
   override fun sendClipboard(text:String?,completion:(String?)->Unit) = run {
     val value=if(text!=null) text else {
-      if(!hasFocus()) { completion("Abra o aplicativo para ler o texto copiado."); return@run }
-      if(sensitive()) { completion("Texto marcado como sensível pelo Android."); return@run }
-      val copied=readLocalClipboardOrNull()
-      if(copied==null) { completion("A área de transferência não contém texto simples válido."); return@run }
-      copied
+      if(!hasFocus()) { clipboardFailure("Abra o aplicativo para ler o texto copiado.",completion); return@run }
+      when(val copied=readLocalClipboard()) {
+        is LocalClipboardRead.Text -> copied.value
+        LocalClipboardRead.Sensitive -> { clipboardFailure("Texto marcado como sensível pelo Android.",completion); return@run }
+        LocalClipboardRead.TooLarge -> { clipboardFailure("Texto copiado ultrapassa o limite de 64 KiB.",completion); return@run }
+        LocalClipboardRead.Unavailable -> { clipboardFailure("A área de transferência não contém texto simples válido.",completion); return@run }
+      }
     }
-    sendText(value,false) { e -> if(e==null) patch { it.copy(sharedText="") }; completion(e) }
+    sendText(value,false) { e ->
+      if(e==null) { patch { it.copy(sharedText="",error="") }; completion(null) }
+      else clipboardFailure(clipboardRequestError(e,true),completion)
+    }
   }
-  override fun getClipboard(completion:(String?)->Unit) = execute(RemoteAction.ClipboardGet,completion)
+  override fun getClipboard(completion:(String?)->Unit) = execute(RemoteAction.ClipboardGet) { e ->
+    if(e==null) { patch { it.copy(error="") }; completion(null) }
+    else clipboardFailure(clipboardRequestError(e,false),completion)
+  }
   override fun copyReceived(completion:(String?)->Unit) = run {
     val text=view.receivedText
     if(text.isEmpty()) { completion("Não há texto recebido."); return@run }
@@ -324,7 +371,12 @@ class RemoteClient(context: Context) : RemoteController {
   private fun writeClipboard(text:String):String? {
     if(!hasFocus()) return "Abra o aplicativo para copiar o texto."
     if(!Protocol.validText(text)) return "Texto inválido."
-    return try { suppressedText=text; lastAppliedText=text; clipboard.setPrimaryClip(ClipData.newPlainText("PC Remote",text)); null } catch (_:Exception) { suppressedText=null; "O Android não permitiu copiar o texto." }
+    if(readLocalClipboardOrNull()==text) { clipboardTracker.applied(text); return null }
+    return try {
+      clipboard.setPrimaryClip(ClipData.newPlainText("PC Remote",text))
+      clipboardTracker.applied(text)
+      null
+    } catch (_:Exception) { "O Android não permitiu copiar o texto." }
   }
   override fun scanQr(activity:Activity,completion:(Invite?,String?)->Unit) {
     GmsBarcodeScanning.getClient(activity).startScan().addOnSuccessListener { barcode -> run {

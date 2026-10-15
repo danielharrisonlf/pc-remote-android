@@ -1,4 +1,4 @@
-# Android Kotlin nativo 0.2.0
+# Android Kotlin nativo 0.2.1
 
 Branch `native/kotlin`; `main` conserva React Native. Views nativas, Kotlin integrado ao AGP e cliente global na Application. Sem Compose, React Native, WebView, Node ou NDK. Pacote `com.pcremote.nativeandroid` permite coexistência, com credenciais/preferências independentes.
 

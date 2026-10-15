@@ -1,4 +1,4 @@
-# Arquitetura — alternativa Kotlin 0.2.0
+# Arquitetura — alternativa Kotlin 0.2.1
 
 Android e Windows são repositórios independentes. A branch native/kotlin é alternativa dentro do Android; não altera main nem cria monorepo. Protocolo 1 + input.v1 é o único contrato, com desktop Rust/Tauri 0.2.0 existente.
 
@@ -9,6 +9,7 @@ Android e Windows são repositórios independentes. A branch native/kotlin é al
 | MainActivity.kt | Views de controle, pareamento/configurações, acessibilidade e ciclo de vida |
 | TouchPadView.kt | Gestos nativos com cancelamento |
 | RemoteClient.kt | WSS/pinning, autenticação, reconexão, ACK/timeouts, NSD, clipboard, share e avisos |
+| ClipboardTracker.kt | Baseline em foco, supressão de eco e recópias sem histórico |
 | CredentialStore.kt | Android Keystore/AES-GCM e credenciais cifradas |
 | Protocol.kt | Validação estrita, limites, dedup/revisões e convite QR |
 | InputMotion.kt | Acumulação fracionária, coalescência e um movimento em voo |

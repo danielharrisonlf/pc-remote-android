@@ -114,6 +114,11 @@ class MainActivity : Activity() {
         client.foreground(this)
     }
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        client.focusChanged(hasFocus)
+    }
+
     override fun onPause() {
         client.background()
         super.onPause()

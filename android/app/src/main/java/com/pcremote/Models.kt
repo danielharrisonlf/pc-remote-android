@@ -35,6 +35,7 @@ interface RemoteController {
     val view: UiState
     fun observe(listener: (UiState) -> Unit): () -> Unit
     fun foreground(activity: android.app.Activity)
+    fun focusChanged(hasFocus: Boolean)
     fun background()
     fun pair(host: String, port: Int, fingerprint: String, code: String)
     fun reconnect()

@@ -2,7 +2,7 @@
 
 | Componente | Versão usada |
 |---|---|
-| Android Kotlin / desktop | 0.2.0-kotlin / 0.2.0 |
+| Android Kotlin / desktop | 0.2.1-kotlin / 0.2.0 |
 | Protocolo | 1 + extensão opcional input.v1 |
 | Android Gradle Plugin | 9.2.1 |
 | Kotlin integrado ao AGP | 2.2.10, confirmado por buildEnvironment |
@@ -18,8 +18,8 @@ Versões diretas são exatas no Gradle. Esta branch não utiliza package-lock, H
 
 | Android | Desktop | Compatibilidade |
 |---|---|---|
-| Kotlin 0.2.0-kotlin | 0.2.x | Volume, mídia, clipboard; input.v1 após consentimento |
-| Kotlin 0.2.0-kotlin | 0.1.x | Volume, mídia e clipboard; sem mouse/teclado |
+| Kotlin 0.2.1-kotlin | 0.2.x | Volume, mídia, clipboard; input.v1 após consentimento |
+| Kotlin 0.2.1-kotlin | 0.1.x | Volume, mídia e clipboard; sem mouse/teclado |
 | React Native main 0.2.x | 0.2.x | Mesmo contrato e capacidades |
 | Qualquer implementação | Sem protocolo 1 | Incompatível; rejeitado |
 
