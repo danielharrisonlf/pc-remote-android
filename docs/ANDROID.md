@@ -1,4 +1,4 @@
-# Android Kotlin nativo 0.2.1
+# Android Kotlin nativo 0.2.3
 
 Branch `native/kotlin`; `main` conserva React Native. Views nativas, Kotlin integrado ao AGP e cliente global na Application. Sem Compose, React Native, WebView, Node ou NDK. Pacote `com.pcremote.nativeandroid` permite coexistência, com credenciais/preferências independentes.
 
@@ -38,3 +38,7 @@ Android 10+ não permite ler cópias de outros apps em segundo plano; serviço e
 EXTRA_IS_SENSITIVE impede envio de conteúdo marcado, inclusive leitura manual. Isso não identifica toda senha. Limite 64 KiB UTF-8; Unicode e quebras preservados; NUL/UTF-16 inválido rejeitados. UUID/revisão, ordem autoritativa do PC e supressão de eco impedem loops. Sem imagens/arquivos, abertura de links ou colagem em aplicativos.
 
 Pause cancela entrada e descoberta; callbacks de rede/backoff fazem nova autenticação e snapshot. Sem replay ou garantia de execução durante Doze. Reconectar explícito retoma tentativas depois de desconexão manual. Interface tem tema do sistema, texto em sp, alvos de 52dp, scroll e insets; Android 13+ usa OnBackInvokedCallback e versões anteriores fallback. Lint não utiliza baseline global para esconder erros. Testes físicos pendentes em TESTING.md.
+
+## Diagnóstico do leitor QR
+
+Se aparecer aviso de módulo indisponível, conecte o celular à internet para que o Google Play Services prepare o leitor e tente novamente; não é necessária conta do PC Remote. O controle do PC continua pela LAN. Se os serviços estiverem desabilitados ou desatualizados, corrija essa condição ou use os campos manuais. Cancelar o leitor retorna ao pareamento sem encerrar o aplicativo. A versão 0.2.2 corrigiu construtores do ML Kit removidos pelo R8; preserve as regras específicas de proguard-rules.pro ao gerar novas builds. A 0.2.3 mantém a correção.

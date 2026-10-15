@@ -13,6 +13,13 @@ import org.json.JSONObject
 internal data class PairedComputer(val host: String, val port: Int, val fingerprint: String, val deviceId: String, val deviceName: String, val pcId: String = "", val pcName: String = "", val token: String = "")
 
 internal class CredentialStore(private val prefs: SharedPreferences) {
+  private val blobStore = CommittedValue(
+    { prefs.getString("credential", null) },
+    { value -> prefs.edit().apply {
+      if (value == null) remove("credential") else putString("credential", value)
+    }.commit() },
+  )
+
   private fun key(): java.security.Key {
     val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     store.getKey("pc_remote_credentials", null)?.let { return it }
@@ -27,16 +34,13 @@ internal class CredentialStore(private val prefs: SharedPreferences) {
     val cipher = Cipher.getInstance("AES/GCM/NoPadding")
     cipher.init(Cipher.ENCRYPT_MODE, key())
     val blob = cipher.iv + cipher.doFinal(value)
-    // Pairing must only proceed when the encrypted credential reached disk.
-    if (!prefs.edit().putString("credential", Base64.encodeToString(blob, Base64.NO_WRAP)).commit())
-      throw IllegalStateException("Could not save encrypted credential")
+    blobStore.write(Base64.encodeToString(blob, Base64.NO_WRAP))
   }
   fun clear() {
-    if (!prefs.edit().remove("credential").commit())
-      throw IllegalStateException("Could not remove encrypted credential")
+    blobStore.write(null)
   }
   fun restore(): PairedComputer? {
-    val blob = prefs.getString("credential", null) ?: return null
+    val blob = blobStore.read() ?: return null
     return try {
       val bytes = Base64.decode(blob, Base64.DEFAULT)
       val cipher = Cipher.getInstance("AES/GCM/NoPadding")

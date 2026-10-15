@@ -91,9 +91,21 @@ class RemoteClient(context: Context) : RemoteController {
   private val motion = InputMotion(main,{ canInput() },{ dx,dy,done -> request(RemoteAction.PointerMove(dx,dy),done) },{ fail(it) })
   private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener { main.post { localClipboardChanged() } }
   private var discovery: NsdManager.DiscoveryListener? = null
+  private var currentNetwork: Network? = null
   private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-    override fun onAvailable(network: Network) { main.post { if(foreground && !requestedDisconnect) { startDiscovery(); autoReconnect() } } }
-    override fun onLost(network: Network) { main.post { if(!requestedDisconnect) { socket?.cancel(); lost(generation) } } }
+    override fun onAvailable(network: Network) { main.post {
+      val previous=currentNetwork
+      currentNetwork=network
+      if(foreground && !requestedDisconnect) {
+        if(previous!=null && previous!=network && socket!=null) lost(generation)
+        startDiscovery(); autoReconnect()
+      }
+    } }
+    override fun onLost(network: Network) { main.post {
+      if(currentNetwork!=network) return@post
+      currentNetwork=null
+      if(!requestedDisconnect) lost(generation)
+    } }
   }
   init {
     clipboard.addPrimaryClipChangedListener(clipboardListener)
@@ -128,8 +140,7 @@ class RemoteClient(context: Context) : RemoteController {
     if(!addressValid(h,port) || !fp.matches(Regex("[a-f0-9]{64}")) || !code.trim().matches(Regex("[0-9]{8}"))) { fail("Confira endereço, porta, código e fingerprint."); return@run }
     if(pairingHandshake) {
       close(false)
-      val restoreError=restoreFailedPair()
-      if(restoreError!=null) { fail(restoreError); return@run }
+      restoreFailedPair()
     }
     previousPairEndpoint=endpoint?.takeIf { it.token.isNotBlank() } ?: store.restore()
     close(false)
@@ -140,15 +151,15 @@ class RemoteClient(context: Context) : RemoteController {
   private fun addressValid(host:String,port:Int)=port in 1..65535 && host.matches(Regex("[a-zA-Z0-9.-]{1,253}")) && !host.contains("..")
   override fun reconnect() = run { requestedDisconnect=false; autoReconnect() }
   private fun autoReconnect() {
-    if(socket != null || requestedDisconnect) return
+    if(socket != null || requestedDisconnect || pairingHandshake) return
     endpoint=endpoint ?: store.restore()
     if(endpoint?.token.isNullOrBlank()) return
     pairCode=null; open(true)
   }
   override fun disconnect() = run {
     close(true)
-    val restoreError=if(pairingHandshake) restoreFailedPair() else null
-    patch { it.copy(status="Desconectado",error=restoreError ?: it.error,snapshot=null,receivedText="",draggingVolume=null) }
+    if(pairingHandshake) restoreFailedPair()
+    patch { it.copy(status="Desconectado",snapshot=null,receivedText="",draggingVolume=null) }
   }
   override fun forget() = run {
     try { store.clear() } catch (_:Exception) { fail("Não foi possível remover a credencial protegida. Tente novamente."); return@run }
@@ -175,18 +186,9 @@ class RemoteClient(context: Context) : RemoteController {
     dropInput(); rejectPending(); volumeTask?.let(main::removeCallbacks); volumeTask=null; finalVolumeTimeout?.let(main::removeCallbacks); finalVolumeTimeout=null; finalVolume=null
     socket?.close(1000,"Desconectado"); socket=null; client?.dispatcher?.executorService?.shutdown(); client=null
   }
-  private fun restoreFailedPair():String? {
-    val previous=previousPairEndpoint
-    val newTokenSaved=!endpoint?.token.isNullOrBlank()
+  private fun restoreFailedPair() {
+    endpoint=previousPairEndpoint
     pairingHandshake=false; previousPairEndpoint=null
-    if(newTokenSaved) try {
-      if(previous==null) store.clear() else store.persist(previous)
-    } catch (_:Exception) {
-      endpoint=null
-      return "Não foi possível restaurar a credencial anterior. Verifique o armazenamento do celular."
-    }
-    endpoint=previous
-    return null
   }
   private fun open(reconnecting:Boolean) {
     val e=endpoint ?: return
@@ -232,19 +234,18 @@ class RemoteClient(context: Context) : RemoteController {
       is Incoming.PairResult -> {
         if(pairCode==null || msg.id!=pairId) { ws.close(1002,null); return }
         val e=endpoint ?: return
-        val paired=e.copy(pcId=msg.pcId,pcName=msg.pcName,token=msg.token)
-        try { store.persist(paired) } catch (_:Exception) {
-          close(true)
-          restoreFailedPair()
-          patch { it.copy(status="Desconectado",error="Não foi possível proteger e salvar o pareamento. Verifique o armazenamento do celular e tente novamente.",snapshot=null) }
-          return
-        }
-        endpoint=paired
+        endpoint=e.copy(pcId=msg.pcId,pcName=msg.pcName,token=msg.token)
         pairCode=null; pairId=null; val id=UUID.randomUUID().toString(); helloId=id
         ws.send(JSONObject().put("v",1).put("type","hello").put("id",id).put("deviceId",e.deviceId).put("token",msg.token).toString())
       }
       is Incoming.Welcome -> {
         if(helloId!=msg.id || endpoint?.pcId!=msg.pcId || endpoint?.token.isNullOrBlank()) { ws.close(1002,null); return }
+        if(pairingHandshake) try { store.persist(endpoint!!) } catch (_:Exception) {
+          close(true)
+          restoreFailedPair()
+          patch { it.copy(status="Desconectado",error="Não foi possível proteger e salvar o pareamento. Verifique o armazenamento do celular e tente novamente.",snapshot=null) }
+          return
+        }
         helloId=null; pairingHandshake=false; previousPairEndpoint=null; authenticated=true; attempt=0; events.clear(); clipboardRevision=0; dropInput()
         if(hasFocus()) clipboardTracker.baseline(readLocalClipboardOrNull()) else clipboardTracker.suspend()
         patch { it.copy(status="Conectado",error="",pcName=msg.pcName,snapshot=null,receivedText="",inputSupported=msg.input,draggingVolume=null) }
@@ -258,8 +259,8 @@ class RemoteClient(context: Context) : RemoteController {
         }
         val message=when(msg.code) { "pairing_expired"->"Código expirou. Gere outro no PC."; "pairing_denied"->"Pareamento recusado no PC."; "rate_limited"->"Muitas tentativas. Aguarde."; "unauthorized"->"Acesso revogado. Pareie novamente."; "unavailable"->"Outro celular já controla este PC."; else->"Pareamento ou autenticação falhou." }
         close(true)
-        val restoreError=if(failedPairing) restoreFailedPair() else null
-        patch { it.copy(status="Desconectado",error=restoreError ?: message) }
+        if(failedPairing) restoreFailedPair()
+        patch { it.copy(status="Desconectado",error=message) }
       } else if(authenticated) complete(msg.id,msg.message)
       is Incoming.Ack -> if(authenticated) complete(msg.id,null) else ws.close(1002,null)
       is Incoming.State -> if(authenticated) onState(msg.snapshot) else ws.close(1002,null)
@@ -268,13 +269,17 @@ class RemoteClient(context: Context) : RemoteController {
   }
   private fun lost(own:Int) {
     if(own!=generation) return
-    val restoreError=if(pairingHandshake) restoreFailedPair() else null
+    // Fence all callbacks from the retired socket before they can schedule another retry.
+    generation++
+    reconnectTask?.let(main::removeCallbacks); reconnectTask=null
+    if(pairingHandshake) restoreFailedPair()
     pairCode=null; pairId=null
-    authenticated=false; clearDisarm(); socket=null; client?.dispatcher?.executorService?.shutdown(); client=null; dropInput(); rejectPending(); finalVolumeTimeout?.let(main::removeCallbacks); finalVolumeTimeout=null; finalVolume=null
-    patch { it.copy(status="Desconectado",error=restoreError ?: it.error,snapshot=null,inputSupported=false,draggingVolume=null) }
+    helloId=null; authenticated=false; clearDisarm(); socket?.cancel(); socket=null; client?.dispatcher?.executorService?.shutdown(); client=null; dropInput(); rejectPending(); volumeTask?.let(main::removeCallbacks); volumeTask=null; finalVolumeTimeout?.let(main::removeCallbacks); finalVolumeTimeout=null; finalVolume=null
+    patch { it.copy(status="Desconectado",snapshot=null,inputSupported=false,draggingVolume=null) }
     if(requestedDisconnect || !foreground || endpoint?.token.isNullOrBlank()) return
     val delay=intArrayOf(1,2,4,8,16,30)[attempt.coerceAtMost(5)]*1000L+SecureRandom().nextInt(500)
-    attempt++; val task=Runnable { reconnectTask=null; if(foreground && !requestedDisconnect) open(true) }; reconnectTask=task; main.postDelayed(task,delay)
+    val retired=generation
+    attempt++; val task=Runnable { if(retired==generation && foreground && !requestedDisconnect) { reconnectTask=null; open(true) } }; reconnectTask=task; main.postDelayed(task,delay)
   }
   private fun complete(id:String,error:String?) { val p=pending.remove(id) ?: return; main.removeCallbacks(p.timeout); if(p.generation==generation) p.completion(error) }
   private fun rejectPending() { val all=pending.values.toList(); pending.clear(); all.forEach { main.removeCallbacks(it.timeout); it.completion("Conexão interrompida.") } }
@@ -429,9 +434,6 @@ class RemoteClient(context: Context) : RemoteController {
       clipboardTracker.applied(text)
       null
     } catch (_:Exception) { "O Android não permitiu copiar o texto." }
-  }
-  override fun scanQr(activity:Activity,completion:(Invite?,String?)->Unit) {
-    QrScanner().start(activity,completion)
   }
   override fun startDiscovery() = run {
     if(discovery!=null) return@run

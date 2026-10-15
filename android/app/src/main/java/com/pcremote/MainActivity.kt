@@ -42,6 +42,7 @@ class MainActivity : Activity() {
     private var lastSharedText = ""
     private var qrError = ""
     private var selectedSessionIds = emptyList<String>()
+    private var sessionLabels = emptyList<String>()
     private var unregisterBack: (() -> Unit)? = null
     private val qrScanner = QrScanner()
 
@@ -100,7 +101,11 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         state = client.view
         buildUi()
-        unsubscribe = client.observe { next -> runOnUiThread { state = next; render() } }
+        unsubscribe = client.observe { next -> runOnUiThread {
+            val changed = state.forDisplay() != next.forDisplay()
+            state = next // Always retain the real revisions for actions and state reconciliation.
+            if (changed) render()
+        } }
         client.receiveShare(intent)
         if (state.status == "Desconectado" && client.savedAddress() == null) page = Page.PAIR
         render()
@@ -454,10 +459,11 @@ class MainActivity : Activity() {
 
         val sessions = state.snapshot?.sessions.orEmpty()
         val ids = sessions.map { it.id }
-        if (ids != selectedSessionIds) {
+        val labels = sessions.map { "${it.app}: ${it.title.ifBlank { "Sem título" }}" }.ifEmpty { listOf("Nenhuma sessão") }
+        if (ids != selectedSessionIds || labels != sessionLabels) {
             selectedSessionIds = ids
-            session.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
-                sessions.map { "${it.app}: ${it.title.ifBlank { "Sem título" }}" }.ifEmpty { listOf("Nenhuma sessão") })
+            sessionLabels = labels
+            session.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
         }
         val index = sessions.indexOfFirst { it.id == state.selectedSessionId }.let { if (it < 0) 0 else it }
         if (sessions.isNotEmpty() && session.selectedItemPosition != index) session.setSelection(index)

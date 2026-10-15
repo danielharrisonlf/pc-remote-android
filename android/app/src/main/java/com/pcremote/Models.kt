@@ -43,7 +43,6 @@ interface RemoteController {
     fun forget()
     fun savedAddress(): Pair<String, Int>?
     fun updateAddress(host: String, port: Int, completion: (String?) -> Unit)
-    fun scanQr(activity: android.app.Activity, completion: (Invite?, String?) -> Unit)
     fun startDiscovery()
     fun stopDiscovery()
     fun execute(action: RemoteAction, completion: (String?) -> Unit = {})

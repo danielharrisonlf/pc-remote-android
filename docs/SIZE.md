@@ -1,11 +1,11 @@
-# Tamanho real do APK — Kotlin 0.2.2
+# Tamanho real do APK — Kotlin 0.2.3
 
-Medido nos arquivos gerados em 14/10/2026. MB = 1.000.000 bytes; MiB = 1.048.576 bytes.
+Medido nos arquivos gerados em 15/10/2026. MB = 1.000.000 bytes; MiB = 1.048.576 bytes.
 
 | Build | Bytes | MB | MiB |
 |---|---:|---:|---:|
-| Kotlin release, R8 e recursos reduzidos | 597017 | 0.597 | 0.569 |
-| Kotlin sizeBaseline, sem R8 | 2406087 | 2.406 | 2.295 |
+| Kotlin release, R8 e recursos reduzidos | 597197 | 0.597 | 0.570 |
+| Kotlin sizeBaseline, sem R8 | 2406519 | 2.407 | 2.295 |
 | React Native main 0.2.0 ARM64 entregue | 20195433 | 20.195 | 19.260 |
 
 Kotlin otimizado: **97.0% menor** que o React Native entregue. Sem R8: **88.1% menor**.
@@ -30,8 +30,8 @@ A assinatura, ambiente e versão das ferramentas podem alterar alguns bytes; est
 ## SHA-256
 
 ```text
-82954c787bf125226ec1c25052cbffbe14a958678ae586e21a625d73b2214828  pc-remote-android-kotlin-0.2.2-evaluation.apk
-016ac8f3edf68f6474d018f36720d7ae9a075ff47e5264e7390a574db54c76f0  pc-remote-android-kotlin-0.2.2-unminified-evaluation.apk
+4f14cff589b3f0c1cf1897f2436351bd579cd5195700c409d70abcdb80c7b389  pc-remote-android-kotlin-0.2.3-evaluation.apk
+b8dbb6f285263b8cf0aa4564c5ae48328dd8f6d3b4513681b4172be640a9bd0f  pc-remote-android-kotlin-0.2.3-unminified-evaluation.apk
 2aea00a472c0abdec79daad5b812f32cce11f9f8966ccd573b1e481a3377f96a  pc-remote-android-0.2.0-arm64-evaluation.apk
 ```
 
