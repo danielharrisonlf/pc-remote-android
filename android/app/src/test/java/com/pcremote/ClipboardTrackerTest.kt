@@ -50,4 +50,40 @@ class ClipboardTrackerTest {
     assertNull(tracker.observe(""))
     assertEquals("B", tracker.observe("B"))
   }
+
+  @Test fun aCopyMadeInAnotherAppIsSentOnceOnReturn() {
+    val tracker = ClipboardTracker()
+    // First focus of the process: only a reference, nothing is sent.
+    assertNull(tracker.resume("copied before the app opened"))
+    tracker.suspend()
+    assertEquals("copied in the browser", tracker.resume("copied in the browser"))
+    tracker.suspend()
+    assertNull(tracker.resume("copied in the browser"))
+    // A copy in focus becomes the reference too.
+    assertEquals("B", tracker.observe("B"))
+    tracker.suspend()
+    assertNull(tracker.resume("B"))
+  }
+
+  @Test fun textAppliedFromThePcNeverEchoesBack() {
+    val tracker = ClipboardTracker()
+    tracker.resume("A")
+    tracker.suspend()
+    // Arrived in the background and was written to the phone clipboard.
+    tracker.applied("from the PC")
+    assertNull(tracker.resume("from the PC"))
+    assertNull(tracker.observe("from the PC"))
+  }
+
+  @Test fun sensitiveOrMissingTextKeepsTheReference() {
+    val tracker = ClipboardTracker()
+    tracker.resume("A")
+    tracker.suspend()
+    assertNull(tracker.resume(null))
+    tracker.suspend()
+    assertNull(tracker.resume("A"))
+    tracker.suspend()
+    assertNull(tracker.resume(""))
+    assertEquals("A", tracker.remembered)
+  }
 }

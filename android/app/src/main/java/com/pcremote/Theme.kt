@@ -77,6 +77,16 @@ internal class UiPreferences(context: Context) {
     get() = prefs.getBoolean("askedUpdateNotice", false)
     set(value) = prefs.edit().putBoolean("askedUpdateNotice", value).apply()
 
+  /** RECORD_AUDIO was asked once; after a refusal without rationale, only the settings can grant it. */
+  var askedMicrophone: Boolean
+    get() = prefs.getBoolean("askedMicrophone", false)
+    set(value) = prefs.edit().putBoolean("askedMicrophone", value).apply()
+
+  /** Android 13+ notification permission was asked once before a file transfer. */
+  var askedFilesNotice: Boolean
+    get() = prefs.getBoolean("askedFilesNotice", false)
+    set(value) = prefs.edit().putBoolean("askedFilesNotice", value).apply()
+
   /** versionCode that last ran, so a reinstall of the same build does not announce an update. */
   var lastVersionCode: Long
     get() = prefs.getLong("lastVersionCode", 0L)

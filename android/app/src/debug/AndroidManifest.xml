@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <!-- Debug builds only: cleartext to the emulator host for the update test server (docs/TESTING.md). -->
-  <application android:networkSecurityConfig="@xml/debug_network_security_config" />
+  <application android:networkSecurityConfig="@xml/debug_network_security_config">
+    <!-- Debug builds only: pairing invite from adb for emulator tests (docs/TESTING.md). -->
+    <receiver android:name="com.pcremote.DebugInviteReceiver" android:exported="true" />
+  </application>
 </manifest>

@@ -7,14 +7,23 @@ data class InputState(val allowed: Boolean, val enabled: Boolean)
 /** Present only when files.v1 was negotiated. */
 data class FilesState(val allowed: Boolean, val maxBytes: Long)
 data class Snapshot(val revision: Long, val audio: AudioState, val sessions: List<MediaSession>, val clipboardRevision: Long, val input: InputState?, val files: FilesState? = null)
-data class Preferences(val upload: Boolean = false, val download: Boolean = false, val paused: Boolean = false, val autoApply: Boolean = false, val haptics: Boolean = true)
+/** The only connection preference: clipboard sync in both directions. Manual sends never depend on it. */
+data class Preferences(val realtime: Boolean = true)
 data class DiscoveredComputer(val name: String, val host: String, val port: Int, val id: String = "")
 data class Invite(val host: String, val port: Int, val fingerprint: String, val code: String)
-/** [received] counts what the PC confirmed, not what is queued on the socket. */
+/** [received] counts what the other side confirmed (sending) or what was written (receiving). */
 data class FileProgress(val name: String, val size: Long, val received: Long, val streaming: Boolean)
 enum class FileOutcome { SENT, FAILED, CANCELLED }
 data class FileResult(val message: String, val outcome: FileOutcome)
-data class FilesView(val active: FileProgress? = null, val queued: List<String> = emptyList(), val paused: Boolean = false, val last: FileResult? = null)
+/** A finished transfer kept in RAM for the list; [uri] opens a file received on Android 10+. */
+data class FileRecord(val name: String, val size: Long, val at: Long, val toPc: Boolean, val uri: String? = null, val mime: String = "")
+data class FilesView(
+    val active: FileProgress? = null, val queued: List<String> = emptyList(), val paused: Boolean = false, val last: FileResult? = null,
+    /** A file the PC is sending to this phone (files.v2). */
+    val incoming: FileProgress? = null,
+    /** Newest first, at most 12. */
+    val history: List<FileRecord> = emptyList(),
+)
 data class UiState(
     val status: String = "Desconectado", val pcName: String = "", val error: String = "",
     val snapshot: Snapshot? = null, val selectedSessionId: String = "", val receivedText: String = "", val sharedText: String = "",
@@ -26,6 +35,12 @@ data class UiState(
     val pairingFingerprint: String = "",
     /** The PC advertised file.transfer on this connection. */
     val filesSupported: Boolean = false, val files: FilesView = FilesView(),
+    /** file.receive: the PC speaks files.v2 (any file up to 1 GB, both directions). */
+    val filesTwoWay: Boolean = false,
+    /** search.youtube: the PC opens YouTube searches. */
+    val searchSupported: Boolean = false,
+    /** "Windows 11" from info.v1; kept while disconnected. */
+    val pcOs: String = "",
 )
 sealed interface RemoteAction {
     data object StateGet : RemoteAction
@@ -42,8 +57,13 @@ sealed interface RemoteAction {
     data class PointerScroll(val steps: Int) : RemoteAction
     data class KeyboardText(val text: String) : RemoteAction
     data class KeyboardKey(val key: String) : RemoteAction
-    data class FileOffer(val transferId: String, val name: String, val size: Long, val mime: String) : RemoteAction
+    /** [twoWay]: files.v2 rules (any type, 1 GB); otherwise files.v1. */
+    data class FileOffer(val transferId: String, val name: String, val size: Long, val mime: String, val twoWay: Boolean = false) : RemoteAction
     data class FileCancel(val transferId: String) : RemoteAction
+    /** files.v2: refuses a file.push; [code] is storage or unavailable. */
+    data class FileDecline(val transferId: String, val code: String) : RemoteAction
+    /** search.v1: the PC opens a YouTube search for [query]. */
+    data class SearchOpen(val query: String) : RemoteAction
 }
 
 interface RemoteController {
@@ -59,27 +79,33 @@ interface RemoteController {
     fun disconnect()
     fun forget()
     fun savedAddress(): Pair<String, Int>?
-    fun updateAddress(host: String, port: Int, completion: (String?) -> Unit)
     fun startDiscovery()
     fun stopDiscovery()
     fun execute(action: RemoteAction, completion: (String?) -> Unit = {})
     fun selectSession(id: String)
     fun setPreferences(preferences: Preferences)
-    /** Shared text fills the draft; shared images and PDFs join the file queue. */
+    /** Shared text fills the draft; shared files join the file queue. */
     fun receiveShare(intent: android.content.Intent)
     /** content:// documents from the picker or a share; each is checked before it joins the queue. */
     fun sendFiles(uris: List<android.net.Uri>)
     fun cancelFile()
+    /** Stops the file the PC is sending to this phone. */
+    fun cancelIncoming()
     fun clearFileQueue()
     /** Restarts a queue paused by a failure that would repeat on the next file. */
     fun resumeFiles()
     fun sendClipboard(text: String?, completion: (String?) -> Unit)
+    /** Asks the PC for its clipboard and copies it on the phone. */
     fun getClipboard(completion: (String?) -> Unit)
     fun copyReceived(completion: (String?) -> Unit)
+    /** Opens a YouTube search on the PC (search.v1). */
+    fun search(query: String, completion: (String?) -> Unit)
     fun beginVolume(value: Int)
     fun updateVolume(value: Int)
     fun endVolume(value: Int)
+    /** "Ativar touchpad": also lifts an earlier "Desligar". */
     fun enableInput(completion: (String?) -> Unit)
+    /** "Desligar": input stays off until "Ativar touchpad", across reconnections. */
     fun disableInput()
     fun movePointer(dx: Float, dy: Float)
     fun cancelPointerMotion()
@@ -87,9 +113,6 @@ interface RemoteController {
     fun scroll(steps: Int)
     fun cancelScroll()
     fun isInputTextAllowed(text: String): Boolean
-    /** Round trip of a state read in milliseconds, or null when it fails. */
-    fun ping(completion: (Long?) -> Unit)
     fun clearReceived()
     fun clearError()
-    fun savedFingerprint(): String?
 }

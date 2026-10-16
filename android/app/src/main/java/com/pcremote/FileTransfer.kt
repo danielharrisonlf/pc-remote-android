@@ -19,8 +19,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
-/** Pinned client of the authenticated control connection, while the PC accepts files. */
-internal class FileLink(val client: OkHttpClient, val port: Int, val generation: Int, val maxBytes: Long)
+/** Pinned client of the authenticated control connection, while the PC accepts files; [twoWay] is files.v2. */
+internal class FileLink(val client: OkHttpClient, val port: Int, val generation: Int, val maxBytes: Long, val twoWay: Boolean = false)
 
 /**
  * files.v1 sender. State lives on the main thread; a worker thread only reads the
@@ -36,10 +36,12 @@ internal class FileTransfer(
   private val control: (RemoteAction, (String?, String?) -> Unit) -> String?,
   private val publish: (FilesView) -> Unit,
   private val failed: (String) -> Unit,
+  /** A file the PC confirmed, for the list of recent transfers. */
+  private val recorded: (FileRecord) -> Unit = {},
 ) {
   private enum class Phase { OFFER, CONNECT, ACCEPT, STREAM, END }
 
-  private class Job(val item: FileItem, val generation: Int) {
+  private class Job(val item: FileItem, val generation: Int, val twoWay: Boolean) {
     val transferId: String = UUID.randomUUID().toString()
     var phase = Phase.OFFER
     var offerId: String? = null
@@ -87,7 +89,7 @@ internal class FileTransfer(
           if (own != epoch) return@post
           checking--
           when (check) {
-            is FileRules.Check.Ok -> if (!queue.add(FileItem(uri.toString(), check.name, check.size, check.mime), active != null)) failed("${check.name} já está na fila.")
+            is FileRules.Check.Ok -> if (!queue.add(FileItem(uri.toString(), check.name, check.size, check.mime, check.legacy), active != null)) failed("${check.name} já está na fila.")
             is FileRules.Check.Rejected -> failed(check.message)
           }
           pump()
@@ -151,14 +153,17 @@ internal class FileTransfer(
   }
 
   private fun start(item: FileItem, l: FileLink) {
-    val job = Job(item, l.generation)
+    val job = Job(item, l.generation, l.twoWay)
     active = job
-    if (item.size > l.maxBytes) { fail(job, "O PC aceita até ${FileRules.megabytes(l.maxBytes)} MB.", pause = false, cancel = false); return }
-    job.offerId = control(RemoteAction.FileOffer(job.transferId, item.name, item.size, item.mime)) { error, code ->
+    // A PC without files.v2 takes only the files.v1 form: PNG, JPG or PDF up to 50 MB.
+    val form = if (l.twoWay) FileRules.Check.Ok(item.name, item.mime, item.size) else item.legacy
+    if (form == null) { fail(job, "Atualize o PC Remote no Windows para enviar este arquivo.", pause = false, cancel = false); return }
+    if (item.size > l.maxBytes) { fail(job, "O PC aceita até ${FileRules.limitLabel(l.maxBytes)}.", pause = false, cancel = false); return }
+    job.offerId = control(RemoteAction.FileOffer(job.transferId, form.name, item.size, form.mime, l.twoWay)) { error, code ->
       if (active !== job || job.phase != Phase.OFFER) return@control
       val t = job.ticket
       when {
-        error != null -> fail(job, FileRules.errorMessage(code, error), FileRules.pausesQueue(code), cancel = false)
+        error != null -> fail(job, FileRules.errorMessage(code, error, l.twoWay), FileRules.pausesQueue(code), cancel = false)
         t == null -> fail(job, "O PC não enviou a autorização do arquivo.", pause = true, cancel = true)
         else -> connect(job, t)
       }
@@ -196,13 +201,14 @@ internal class FileTransfer(
     if (active !== job || job.socket !== ws) return
     when {
       // The PC deletes partial data and closes after an error, so there is nothing to cancel.
-      message is FileMessage.Error -> fail(job, FileRules.errorMessage(message.code, message.message), FileRules.pausesQueue(message.code), cancel = false)
+      message is FileMessage.Error -> fail(job, FileRules.errorMessage(message.code, message.message, job.twoWay), FileRules.pausesQueue(message.code), cancel = false)
       message is FileMessage.Accept && job.phase == Phase.ACCEPT && message.id == job.beginId && message.transferId == job.transferId -> stream(job, ws)
       message is FileMessage.Progress && (job.phase == Phase.STREAM || job.phase == Phase.END) && message.transferId == job.transferId &&
         message.received >= job.received && message.received <= minOf(job.sent, job.item.size) -> progress(job, message.received)
       message is FileMessage.Done && job.phase == Phase.END && message.id == job.endId && message.transferId == job.transferId -> {
         job.received = job.item.size
         finish(job, FileResult("${message.name} enviado ao PC.", FileOutcome.SENT))
+        recorded(FileRecord(message.name, job.item.size, System.currentTimeMillis(), toPc = true))
         pump()
       }
       else -> fail(job, "O PC respondeu fora do protocolo.", pause = true, cancel = true)
@@ -225,6 +231,8 @@ internal class FileTransfer(
   /** Worker thread: sends exactly the declared size, hashing it and never exceeding the PC's window. */
   private fun upload(job: Job, ws: WebSocket, chunk: Int, window: Int) {
     val size = job.item.size
+    // files.v1 PCs check the content signature; files.v2 takes any content.
+    val signature = if (job.twoWay) null else job.item.legacy?.mime
     var problem: String? = null
     var pause = false
     var digest: String? = null
@@ -240,7 +248,7 @@ internal class FileTransfer(
           while (n < want) { val r = stream.read(buffer, n, want - n); if (r < 0) break; n += r }
           // A document replaced since it was queued would fail the PC's checks anyway.
           val head = sent == 0L && n >= minOf(size, FileRules.HEAD_BYTES.toLong())
-          if (n < want || (head && !FileRules.signatureMatches(job.item.mime, buffer, n))) { problem = FileRules.CHANGED; break }
+          if (n < want || (head && signature != null && !FileRules.signatureMatches(signature, buffer, n))) { problem = FileRules.CHANGED; break }
           sha.update(buffer, 0, n)
           if (!awaitWindow(job, sent + n, window)) return
           job.sent = sent + n
@@ -342,7 +350,7 @@ internal class FileTransfer(
       var read = 0
       val input = resolver.openInputStream(uri) ?: return FileRules.Check.Rejected("Não foi possível abrir o arquivo.")
       input.use { while (read < head.size) { val n = it.read(head, read, head.size - read); if (n < 0) break; read += n } }
-      FileRules.check(name, resolver.getType(uri), size, head, read)
+      FileRules.checkAny(name, resolver.getType(uri), size, head, read)
     } catch (_: SecurityException) {
       FileRules.Check.Rejected("O Android não deu permissão para ler o arquivo.")
     } catch (_: Exception) {

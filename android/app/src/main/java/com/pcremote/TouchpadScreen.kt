@@ -41,12 +41,15 @@ internal interface ScreenHost {
   /** In-window panels; a Dialog would take focus and pause input. */
   val panels: PanelLayer
   fun notify(message: String, tone: Tone = Tone.ACCENT)
-  fun haptic()
   /** Errors become snackbars; success shows one only when it says something new. */
   fun result(error: String?, success: String? = null)
   fun navigate(tab: Tab)
-  /** System document picker for images and PDFs; the result joins the file queue. */
+  /** System document picker for any file; the result joins the file queue. */
   fun pickFiles()
+  /** Opens a file received from the PC with the app Android picks for it. */
+  fun openFile(record: FileRecord)
+  /** Asks for RECORD_AUDIO on first use only; [granted] runs once it is allowed. */
+  fun requestMicrophone(granted: () -> Unit)
   fun scanQr()
   fun openPairingSheet()
   fun openUpdate()
@@ -63,6 +66,8 @@ internal interface ScreenHost {
 internal interface Screen {
   val view: View
   fun render(state: UiState)
+  /** The Activity paused: release anything that should not outlive the visit, such as the microphone. */
+  fun pause() {}
 }
 
 /**
@@ -79,10 +84,9 @@ internal class TouchpadScreen(private val host: ScreenHost) : Screen {
   private var activating = false
   private val stop = ui.button("Desligar", ButtonStyle.TEXT, R.drawable.ic_hand) { client.disableInput() }
   private val pad = TouchPadView(ui, client, { enabled }) { button ->
-    host.haptic()
     client.execute(RemoteAction.PointerClick(button, 1)) { host.result(it) }
   }
-  private val strip = ScrollStripView(ui, client, { enabled }) { host.haptic() }
+  private val strip = ScrollStripView(ui, client, { enabled }) {}
   private val hint = ui.column(2).apply {
     gravity = Gravity.CENTER_HORIZONTAL
     background = ui.rounded(ui.palette.pad, 12f)
@@ -163,7 +167,6 @@ internal class TouchpadScreen(private val host: ScreenHost) : Screen {
     if (icon != null) addView(ui.icon(icon, ui.palette.text, 18))
     if (label.isNotEmpty()) addView(ui.text(label, TextStyle.LABEL))
     setOnClickListener {
-      host.haptic()
       client.execute(action) { host.result(it) }
     }
     inputViews += this
@@ -172,10 +175,10 @@ internal class TouchpadScreen(private val host: ScreenHost) : Screen {
   private fun clickButton(label: String, button: String): View = FrameLayout(ui.context).apply {
     background = ui.ripple(ui.rounded(ui.palette.surface, 20f, ui.palette.border), 20f)
     isClickable = true
+    isHapticFeedbackEnabled = false
     contentDescription = label
     addView(ui.text(label, TextStyle.LABEL, ui.palette.textSecondary), FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
     setOnClickListener {
-      host.haptic()
       client.execute(RemoteAction.PointerClick(button, 1)) { host.result(it) }
     }
     inputViews += this
@@ -209,10 +212,10 @@ internal class TouchpadScreen(private val host: ScreenHost) : Screen {
         Blocker.DISCONNECTED -> ui.emptyState(R.drawable.ic_unplug, "Sem conexão com o PC", "Conecte-se a um computador pareado para usar o touchpad.",
           ui.button("Abrir Conexão", ButtonStyle.TONAL) { host.navigate(Tab.CONNECTION) })
         Blocker.OUTDATED -> ui.emptyState(R.drawable.ic_circle_arrow_up, "Atualize o PC Remote no Windows", "A versão do PC ainda não aceita mouse e teclado.")
-        Blocker.BLOCKED -> ui.emptyState(R.drawable.ic_lock, "Bloqueado no PC", "No Windows, abra Transferência e ligue Permitir mouse e teclado pelo celular.")
-        Blocker.OFF -> ui.emptyState(R.drawable.ic_touchpad, "Touchpad desligado", "Os cliques e o texto vão para a janela em foco no Windows.",
+        Blocker.BLOCKED -> ui.emptyState(R.drawable.ic_lock, "Bloqueado no PC", "No Windows, abra Transferência e libere o mouse e o teclado.")
+        Blocker.OFF -> ui.emptyState(R.drawable.ic_touchpad, if (waking) "Preparando o touchpad…" else "Touchpad desligado", "Os cliques e o texto vão para a janela em foco no Windows.",
           ui.button(if (waking) "Ativando…" else "Ativar touchpad", ButtonStyle.FILLED, large = true) {
-            client.enableInput { error -> if (error == null) host.haptic() else host.result(error) }
+            client.enableInput { error -> host.result(error) }
           }.apply { isEnabled = !waking })
         Blocker.NONE -> null
       }
@@ -297,7 +300,6 @@ internal class KeyboardSheet(private val host: ScreenHost) {
     host.activity.runOnUiThread {
       button.setBusy(false)
       if (error == null) {
-        host.haptic()
         field.setText("")
         feedback.text = if (enter) "Texto enviado e Enter pressionado." else "Texto enviado ao PC."
         feedback.setTextColor(ui.palette.success)

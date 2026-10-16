@@ -61,7 +61,8 @@ class ProtocolTest {
     assertNull(Protocol.parse(state.replace("\"maxBytes\":52428800","\"maxBytes\":52428800,\"extra\":1")))
     assertNull(Protocol.parse(state.replace("\"maxBytes\":52428800","\"maxBytes\":\"52428800\"")))
     assertNull(Protocol.parse(state.replace("\"maxBytes\":52428800","\"maxBytes\":0")))
-    assertNull(Protocol.parse(state.replace("\"maxBytes\":52428800","\"maxBytes\":52428801")))
+    assertEquals(FileRules.MAX_BYTES,(Protocol.parse(state.replace("\"maxBytes\":52428800","\"maxBytes\":1073741824")) as Incoming.State).snapshot.files!!.maxBytes)
+    assertNull(Protocol.parse(state.replace("\"maxBytes\":52428800","\"maxBytes\":1073741825")))
     assertNull(Protocol.parse(state.replace("\"allowed\":true","\"allowed\":1")))
     assertNull(Protocol.parse(state.replace(",\"maxBytes\":52428800","")))
   }
@@ -97,7 +98,8 @@ class ProtocolTest {
     assertNull(Protocol.parseFile(progress.replace("262144","-1")))
     assertNull(Protocol.parseFile(progress.replace("262144","1.5")))
     assertNull(Protocol.parseFile(progress.replace("262144","\"262144\"")))
-    assertNull(Protocol.parseFile(progress.replace("262144","52428801")))
+    assertNotNull(Protocol.parseFile(progress.replace("262144","1073741824")))
+    assertNull(Protocol.parseFile(progress.replace("262144","1073741825")))
     val done="""{"v":1,"type":"file.done","id":"$id","transferId":"$transfer","name":"foto (1).jpg"}"""
     assertEquals(FileMessage.Done(id,transfer,"foto (1).jpg"),Protocol.parseFile(done))
     assertNull(Protocol.parseFile(done.replace("foto (1).jpg","")))
@@ -162,5 +164,106 @@ class ProtocolTest {
     assertNull(Protocol.parseInvite(invite.replace("\"v\":1","\"v\":1.5")))
     assertNull(Protocol.parseInvite(invite.replace("\"pcId\":\"$id\",","")))
     assertNull(Protocol.parseInvite(invite.dropLast(1)+",\"extra\":true}"))
+  }
+  @Test fun negotiated06WelcomeAndPushAreStrict() {
+    val welcome="""{"v":1,"type":"welcome","id":"$id","pcId":"$id","pcName":"PC","capabilities":["audio","file.transfer","file.receive","search.youtube"],"os":"Windows 11"}"""
+    val parsed=Protocol.parse(welcome) as Incoming.Welcome
+    assertTrue(parsed.files && parsed.fileReceive && parsed.search)
+    assertEquals("Windows 11",parsed.os)
+    assertEquals("",(Protocol.parse(welcome.replace(",\"os\":\"Windows 11\"","")) as Incoming.Welcome).os)
+    assertNull(Protocol.parse(welcome.replace("Windows 11","")))
+    assertNull(Protocol.parse(welcome.replace("Windows 11","a\u0007b")))
+    assertNull(Protocol.parse(welcome.replace("Windows 11","x".repeat(65))))
+    assertNull(Protocol.parse(welcome.replace("\"os\"","\"system\"")))
+    val push="""{"v":1,"type":"file.push","transferId":"$transfer","name":"Relatório.pdf","size":123,"mime":"application/pdf","ticket":"$ticket"}"""
+    assertEquals(Incoming.FilePush(transfer,"Relatório.pdf",123,"application/pdf",ticket),Protocol.parse(push))
+    assertNull(Protocol.parse(push.replace(ticket,ticket.uppercase())))
+    assertNull(Protocol.parse(push.replace("\"size\":123","\"size\":0")))
+    assertNull(Protocol.parse(push.replace("\"size\":123","\"size\":1073741825")))
+    assertNull(Protocol.parse(push.replace("application/pdf","Application/PDF")))
+    assertNull(Protocol.parse(push.replace("Relatório.pdf","")))
+    assertNull(Protocol.parse(push.replace("Relatório.pdf","a\nb.pdf")))
+    assertNull(Protocol.parse(push.dropLast(1)+",\"path\":\"C:\\\\\"}"))
+    // file.push is a control event; file.end belongs only to /v1/files.
+    assertNull(Protocol.parseFile(push))
+    val end="""{"v":1,"type":"file.end","id":"$id","transferId":"$transfer","sha256":"$ticket"}"""
+    assertEquals(FileMessage.End(id,transfer,ticket),Protocol.parseFile(end))
+    assertNull(Protocol.parseFile(end.replace(ticket,ticket.drop(1))))
+    assertNull(Protocol.parse(end))
+  }
+
+  @Test fun negotiated06BuildersFollowTheContract() {
+    assertNotNull(Protocol.action(RemoteAction.FileOffer(transfer,"Viagem 2026.mp4",734003200,"video/mp4",twoWay=true)))
+    assertNull(Protocol.action(RemoteAction.FileOffer(transfer,"Viagem 2026.mp4",734003200,"video/mp4")))
+    val decline=Protocol.action(RemoteAction.FileDecline(transfer,"storage"))!!
+    assertEquals(setOf("kind","transferId","code"),decline.keys().asSequence().toSet())
+    assertNull(Protocol.action(RemoteAction.FileDecline(transfer,"busy")))
+    val search=Protocol.action(RemoteAction.SearchOpen("vídeos de Node.js"))!!
+    assertEquals(setOf("kind","service","query"),search.keys().asSequence().toSet())
+    assertEquals("youtube",search.getString("service"))
+    assertNotNull(Protocol.action(RemoteAction.SearchOpen("🙂".repeat(200))))
+    for (bad in listOf("","   ","x".repeat(201),"linha\nquebrada","tab\tx")) assertNull(bad,Protocol.action(RemoteAction.SearchOpen(bad)))
+    assertNull(Protocol.fileFetch(id,transfer,ticket.uppercase()))
+    assertNull(Protocol.fileProgress(transfer,-1))
+    assertNull(Protocol.fileProgress(transfer,FileRules.MAX_BYTES+1))
+    assertNull(Protocol.fileDone(id,transfer,""))
+    assertNull(Protocol.fileError(id,"disk_full","x",true))
+    assertEquals(setOf("v","type","id","code","message","retryable"),JSONObject(Protocol.fileError("00000000-0000-0000-0000-000000000000","storage","Sem espaço",true)!!).keys().asSequence().toSet())
+  }
+
+  /** negotiated06 in the shared examples: every PC frame parses and every phone frame is what the builders emit. */
+  @Test fun negotiated06GoldenExamples() {
+    var dir: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
+    while (dir != null && !File(dir,"docs/protocol-v1.examples.json").isFile) dir = dir.parentFile
+    val examples=JSONObject(File(dir!!,"docs/protocol-v1.examples.json").readText()).getJSONObject("negotiated06")
+    val headers=examples.getJSONArray("headers")
+    assertEquals((0 until headers.length()).map { headers.getString(it) },listOf("input.v1","files.v1","files.v2","search.v1","info.v1"))
+    val server=examples.getJSONArray("server")
+    for (i in 0 until server.length()) assertNotNull(server.get(i).toString(),Protocol.parse(server.get(i).toString()))
+    fun same(expected: JSONObject, built: JSONObject) {
+      assertEquals(expected.keys().asSequence().toSet(),built.keys().asSequence().toSet())
+      for (key in expected.keys()) assertEquals(key,expected.get(key).toString(),built.get(key).toString())
+    }
+    val client=examples.getJSONArray("client")
+    for (i in 0 until client.length()) {
+      val a=client.getJSONObject(i).getJSONObject("action")
+      val built=when (a.getString("kind")) {
+        "file.offer" -> Protocol.action(RemoteAction.FileOffer(a.getString("transferId"),a.getString("name"),a.getLong("size"),a.getString("mime"),twoWay=true))
+        "file.decline" -> Protocol.action(RemoteAction.FileDecline(a.getString("transferId"),a.getString("code")))
+        "search.open" -> Protocol.action(RemoteAction.SearchOpen(a.getString("query")))
+        else -> null
+      }
+      assertNotNull(a.toString(),built)
+      same(a,built!!)
+    }
+    val invalid=examples.getJSONArray("invalidClient")
+    for (i in 0 until invalid.length()) {
+      val a=invalid.getJSONObject(i).getJSONObject("action")
+      val built=when (a.getString("kind")) {
+        "file.offer" -> Protocol.action(RemoteAction.FileOffer(a.getString("transferId"),a.getString("name"),a.getLong("size"),a.getString("mime"),twoWay=true))
+        "file.decline" -> Protocol.action(RemoteAction.FileDecline(a.getString("transferId"),a.getString("code")))
+        // The builder only knows youtube and never adds other fields.
+        "search.open" -> if (a.getString("service")!="youtube" || a.length()!=3) null else Protocol.action(RemoteAction.SearchOpen(a.getString("query")))
+        else -> fail(a.toString())
+      }
+      assertNull(a.toString(),built)
+    }
+    val socket=examples.getJSONObject("fileSocket")
+    val fromPc=socket.getJSONArray("server")
+    for (i in 0 until fromPc.length()) assertNotNull(fromPc.get(i).toString(),Protocol.parseFile(fromPc.get(i).toString()))
+    val fromPhone=socket.getJSONArray("client")
+    for (i in 0 until fromPhone.length()) {
+      val m=fromPhone.getJSONObject(i)
+      val built=when (m.getString("type")) {
+        "file.fetch" -> Protocol.fileFetch(m.getString("id"),m.getString("transferId"),m.getString("ticket"))
+        "file.progress" -> Protocol.fileProgress(m.getString("transferId"),m.getLong("received"))
+        "file.done" -> Protocol.fileDone(m.getString("id"),m.getString("transferId"),m.getString("name"))
+        "error" -> Protocol.fileError(m.getString("id"),m.getString("code"),m.getString("message"),m.getBoolean("retryable"))
+        else -> null
+      }
+      assertNotNull(m.toString(),built)
+      same(m,JSONObject(built!!))
+      assertEquals(m.toString().length,built.length)
+    }
   }
 }

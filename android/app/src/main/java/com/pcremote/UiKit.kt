@@ -40,7 +40,10 @@ internal enum class TextStyle(val sizeSp: Float, val face: String, val style: In
 internal enum class ButtonStyle { FILLED, TONAL, OUTLINED, TEXT, DANGER }
 internal enum class Tone { SUCCESS, WARNING, DANGER, ACCENT, NEUTRAL }
 
-/** View factory bound to one palette. Every screen builds its Views through it. */
+/**
+ * View factory bound to one palette. Every screen builds its Views through it.
+ * Nothing it builds vibrates: feedback is visual (ripples, busy labels, snackbars).
+ */
 internal class Ui(val context: Context, val palette: Palette) {
   private val density = context.resources.displayMetrics.density
 
@@ -86,11 +89,13 @@ internal class Ui(val context: Context, val palette: Palette) {
 
   fun column(gapDp: Int = 0): LinearLayout = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
+    isHapticFeedbackEnabled = false
     if (gapDp > 0) { dividerDrawable = gap(gapDp); showDividers = LinearLayout.SHOW_DIVIDER_MIDDLE }
   }
 
   fun row(gapDp: Int = 0): LinearLayout = LinearLayout(context).apply {
     orientation = LinearLayout.HORIZONTAL
+    isHapticFeedbackEnabled = false
     gravity = Gravity.CENTER_VERTICAL
     if (gapDp > 0) { dividerDrawable = gap(gapDp); showDividers = LinearLayout.SHOW_DIVIDER_MIDDLE }
   }
@@ -130,6 +135,7 @@ internal class Ui(val context: Context, val palette: Palette) {
     background = RippleDrawable(ColorStateList.valueOf(palette.ripple), shape, GradientDrawable().apply { this.shape = GradientDrawable.OVAL; setColor(Color.WHITE) })
     layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
     minimumWidth = dp(48); minimumHeight = dp(48)
+    isHapticFeedbackEnabled = false
     setOnClickListener { onClick() }
   }
 
@@ -144,6 +150,7 @@ internal class Ui(val context: Context, val palette: Palette) {
     setPadding(dp(16), dp(14), dp(16), dp(14))
     minHeight = dp(52)
     inputType = InputType.TYPE_CLASS_TEXT
+    isHapticFeedbackEnabled = false
   }
 
   fun chip(): StatusChip = StatusChip(this)
@@ -189,6 +196,7 @@ internal class PillButton(private val ui: Ui, private val style: ButtonStyle, la
     gravity = Gravity.CENTER
     isClickable = true
     isFocusable = true
+    isHapticFeedbackEnabled = false
     minimumHeight = ui.dp(if (large) 56 else 48)
     setPadding(ui.dp(if (large) 24 else 20), 0, ui.dp(if (large) 24 else 20), 0)
     val p = ui.palette
@@ -269,6 +277,8 @@ internal class SwitchRow(ui: Ui, labelText: String, description: String?, icon: 
     minimumHeight = ui.dp(64)
     setPadding(0, ui.dp(10), 0, ui.dp(10))
     background = ui.ripple(null, 12f)
+    isHapticFeedbackEnabled = false
+    toggle.isHapticFeedbackEnabled = false
     if (icon != null) {
       addView(FrameLayout(context).apply {
         background = ui.rounded(ui.palette.surfaceSunken, 10f)
