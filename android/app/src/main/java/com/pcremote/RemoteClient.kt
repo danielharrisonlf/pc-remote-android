@@ -70,10 +70,8 @@ class RemoteClient(context: Context) : RemoteController {
   private var reconnectTask: Runnable? = null
   private val pending = LinkedHashMap<String, Pending>()
   private data class Pending(val completion:(String?)->Unit,val timeout:Runnable,val generation:Int)
-  private val events = ClipboardEvents()
+  private val clipboardSession = ClipboardSession()
   private val clipboardTracker = ClipboardTracker()
-  private var clipboardRevision = 0L
-  private var pendingBackgroundText: String? = null
   private var volumeAt = 0L
   private var volumeTask: Runnable? = null
   private var dragGeneration = 0
@@ -121,7 +119,7 @@ class RemoteClient(context: Context) : RemoteController {
   override fun foreground(activity:Activity) = run {
     this.activity=WeakReference(activity); foreground=true
     if(hasFocus()) clipboardTracker.baseline(readLocalClipboardOrNull()) else clipboardTracker.suspend()
-    pendingBackgroundText?.let { onClipboard(Incoming.Clipboard(UUID.randomUUID().toString(),clipboardRevision,it,false),false); pendingBackgroundText=null }
+    clipboardSession.takePending()?.let { pending -> patch { it.copy(receivedText=pending.text) } }
     autoReconnect(); if(!requestedDisconnect) startDiscovery()
   }
   override fun background() = run {
@@ -182,7 +180,7 @@ class RemoteClient(context: Context) : RemoteController {
   }
   private fun close(user:Boolean) {
     requestedDisconnect=user; reconnectTask?.let(main::removeCallbacks); reconnectTask=null
-    generation++; authenticated=false; clearDisarm(); pairId=null; helloId=null; pairCode=null
+    generation++; retireClipboard(); authenticated=false; clearDisarm(); pairId=null; helloId=null; pairCode=null
     dropInput(); rejectPending(); volumeTask?.let(main::removeCallbacks); volumeTask=null; finalVolumeTimeout?.let(main::removeCallbacks); finalVolumeTimeout=null; finalVolume=null
     socket?.close(1000,"Desconectado"); socket=null; client?.dispatcher?.executorService?.shutdown(); client=null
   }
@@ -193,7 +191,7 @@ class RemoteClient(context: Context) : RemoteController {
   private fun open(reconnecting:Boolean) {
     val e=endpoint ?: return
     reconnectTask?.let(main::removeCallbacks); reconnectTask=null
-    generation++; val own=generation; authenticated=false; clearDisarm(); dropInput(); rejectPending()
+    generation++; val own=generation; retireClipboard(); authenticated=false; clearDisarm(); dropInput(); rejectPending()
     patch { it.copy(status=if(reconnecting) "Reconectando" else "Conectando",snapshot=null,inputSupported=false) }
     try {
       val trust=object:X509TrustManager {
@@ -246,7 +244,7 @@ class RemoteClient(context: Context) : RemoteController {
           patch { it.copy(status="Desconectado",error="Não foi possível proteger e salvar o pareamento. Verifique o armazenamento do celular e tente novamente.",snapshot=null) }
           return
         }
-        helloId=null; pairingHandshake=false; previousPairEndpoint=null; authenticated=true; attempt=0; events.clear(); clipboardRevision=0; dropInput()
+        helloId=null; pairingHandshake=false; previousPairEndpoint=null; authenticated=true; attempt=0; clipboardSession.retire(); dropInput()
         if(hasFocus()) clipboardTracker.baseline(readLocalClipboardOrNull()) else clipboardTracker.suspend()
         patch { it.copy(status="Conectado",error="",pcName=msg.pcName,snapshot=null,receivedText="",inputSupported=msg.input,draggingVolume=null) }
         request(RemoteAction.StateGet) {}; sendSync()
@@ -271,6 +269,7 @@ class RemoteClient(context: Context) : RemoteController {
     if(own!=generation) return
     // Fence all callbacks from the retired socket before they can schedule another retry.
     generation++
+    retireClipboard()
     reconnectTask?.let(main::removeCallbacks); reconnectTask=null
     if(pairingHandshake) restoreFailedPair()
     pairCode=null; pairId=null
@@ -315,7 +314,7 @@ class RemoteClient(context: Context) : RemoteController {
     val old=view.snapshot
     if(old!=null && s.revision<old.revision) return
     if(old!=null && s.revision==old.revision && finalVolume?.acked!=true) return
-    clipboardRevision=maxOf(clipboardRevision,s.clipboardRevision)
+    clipboardSession.advanceRevision(s.clipboardRevision)
     if(s.input?.allowed==false || (s.input?.enabled==false && view.inputArmed)) dropInput()
     if(inputDisarming && s.input?.enabled==false) {
       disarmStateSeen=true
@@ -333,11 +332,14 @@ class RemoteClient(context: Context) : RemoteController {
     if(activating?.fresh==true && activating.acked) finishActivation(activating,null)
   }
   private fun onClipboard(e:Incoming.Clipboard,allowAuto:Boolean) {
-    if(!events.accept(e,view.snapshot?.clipboardRevision ?: 0)) return
-    clipboardRevision=maxOf(clipboardRevision,e.revision)
-    if(!foreground) { pendingBackgroundText=e.text; notifyClipboard(); return }
+    if(!clipboardSession.accept(e,view.snapshot?.clipboardRevision ?: 0)) return
+    if(!foreground) { clipboardSession.defer(e); notifyClipboard(); return }
     patch { it.copy(receivedText=e.text) }
     if(allowAuto && hasFocus() && view.preferences.download && view.preferences.autoApply && !view.preferences.paused) writeClipboard(e.text)
+  }
+  private fun retireClipboard() {
+    clipboardSession.retire()
+    if(view.receivedText.isNotEmpty()) patch { it.copy(receivedText="") }
   }
   private fun sendSync() { if(authenticated) { val p=view.preferences; request(RemoteAction.SyncSet(p.upload,p.download,p.paused)) {} } }
   override fun setPreferences(preferences:Preferences) = run {
@@ -383,7 +385,7 @@ class RemoteClient(context: Context) : RemoteController {
   }
   private fun sendText(text:String,automatic:Boolean,completion:(String?)->Unit) {
     if(!Protocol.validText(text)) { completion("Texto acima de 64 KiB ou inválido."); return }
-    request(RemoteAction.ClipboardSet(UUID.randomUUID().toString(),text,automatic,clipboardRevision),completion)
+    request(RemoteAction.ClipboardSet(UUID.randomUUID().toString(),text,automatic,clipboardSession.revision),completion)
   }
   override fun receiveShare(intent:Intent) = run {
     if(intent.action!=Intent.ACTION_SEND || intent.type!="text/plain") return@run

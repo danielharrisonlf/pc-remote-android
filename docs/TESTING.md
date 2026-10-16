@@ -2,6 +2,14 @@
 
 Registro da alternativa 0.2.0-kotlin em 14/10/2026. Os resultados React Native da branch main não são apresentados como testes desta implementação. Integrações reais: Android SDK/Keystore/OkHttp e Windows Rust/Core Audio/GSMTC/clipboard/SendInput. Não há simulações no produto.
 
+## Atualização 0.2.4-kotlin — revisão de bugs, 15/10/2026
+
+- **33 testes JUnit passaram**; `testDebugUnitTest assembleRelease assembleSizeBaseline lintRelease` concluídos. Lint: zero erros e 13 avisos. As regressões cobrem volume sem toque, navegação com entrada ativada e descarte de clipboard ao encerrar a conexão.
+- APK release em emulador próprio API36, com fixture TLS: alteração por DPAD para 55% foi confirmada; o estado remoto posterior de 17% apareceu na interface. Abrir Configurações ou Parear desativou a entrada. Preview recebido em segundo plano permaneceu disponível na mesma sessão e foi descartado após desconexão.
+- Estes resultados não certificam celular físico nem leitura óptica de QR no Android 12/13; as pendências e evidências históricas abaixo permanecem válidas.
+
+Consulte a [auditoria de segurança](SECURITY-AUDIT.md) e o [relatório de bugs e regressões de 15/10/2026](BUG-AUDIT-2026-10-15.md) para os achados, correções e evidências consolidadas.
+
 ## Atualização 0.2.3-kotlin — revisão de regressões, 15/10/2026
 
 - **20 testes JUnit passaram**: protocolo (5), clipboard (4), scanner (5), gravação de credenciais (4) e estado visível da interface (2). Os novos testes reproduzem um armazenamento cujo cache muda mesmo quando commit falha, incluindo falha da restauração, primeira gravação, remoção e recuperação posterior. São testes da regra de armazenamento; Android Keystore e gravação física continuam usando as APIs nativas.

@@ -1,22 +1,23 @@
 # PC Remote Android — Kotlin nativo
 
-Versão **0.2.3-kotlin**, branch **native/kotlin**. A branch `main` conserva React Native. Esta alternativa usa Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao mesmo desktop Rust/Tauri pela LAN, com protocolo 1 e extensão `input.v1`.
+Versão **0.2.4-kotlin**, branch **native/kotlin**. A branch `main` conserva React Native. Esta alternativa usa Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao mesmo desktop Rust/Tauri pela LAN, com protocolo 1 e extensão `input.v1`.
 
 ## Baixar e instalar
 
 | Aplicativo | Download |
 |---|---|
-| Android Kotlin — APK universal, Android 7/API24+ | [Baixar APK Kotlin](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.3-kotlin/pc-remote-android-kotlin-0.2.3-evaluation.apk) |
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.2.1/pc-remote-desktop-0.2.1-x64-setup.exe) |
-| Android React Native — alternativa ARM64 | [Baixar APK React Native](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.0/pc-remote-android-0.2.0-arm64-evaluation.apk) |
+| Android Kotlin — APK universal, Android 7/API24+ | [Baixar APK Kotlin](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.4-kotlin/pc-remote-android-kotlin-0.2.4-evaluation.apk) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.2.2/pc-remote-desktop-0.2.2-x64-setup.exe) |
+| Android React Native — alternativa ARM64 | [Baixar APK React Native](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.1/pc-remote-android-0.2.1-arm64-evaluation.apk) |
+| Android React Native — alternativa x86_64 para emulador | [Baixar APK React Native x86_64](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.1/pc-remote-android-0.2.1-x86_64-evaluation.apk) |
 
-Downloads em repositórios privados: entre no GitHub com uma conta autorizada. Veja a [release Kotlin](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.2.3-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.2.1). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
+Downloads em repositórios privados: entre no GitHub com uma conta autorizada. Veja a [release Kotlin](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.2.4-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.2.2). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
 
 Instale o `.exe` no PC e abra o APK pelo gerenciador de arquivos do celular, autorizando a fonte quando solicitado. A versão Kotlin aparece como **PC Remote Kotlin**, pacote `com.pcremote.nativeandroid`, e pode coexistir com React Native. Cada app precisa de pareamento próprio; somente um controlador pode ficar conectado por PC. O uso não requer Metro, Expo Go, root, ADB, acessibilidade ou teclado especial.
 
 ## Tamanho
 
-**APK final: 597197 bytes (0.597 MB), aproximadamente 97.0% menor que os 20.20 MB do React Native entregue.** Sem R8: 2.407 MB.
+**APK final: 599989 bytes (0.600 MB), aproximadamente 97.0% menor que os 20.20 MB do React Native entregue.** Sem R8: 2.410 MB.
 
 Veja [SIZE.md](docs/SIZE.md) para bytes exatos, hashes e comparação das builds Kotlin com e sem R8 e do APK React Native entregue. O tamanho do download difere do espaço instalado e do consumo de RAM. O scanner QR opcional pode baixar módulos externos do Google Play Services, que não fazem parte do APK.
 
@@ -52,10 +53,14 @@ No Windows, habilite **Permitir mouse e teclado pelo celular**. No Android, toqu
 
 ## Documentação e testes
 
-[Arquitetura](docs/ARCHITECTURE.md), [protocolo](docs/PROTOCOL.md), [testes e pendências](docs/TESTING.md). Contrato e exemplos são idênticos aos do desktop. Kotlin 0.2.3 funciona com desktop 0.2.x; desktop 0.1.x conserva volume, mídia e clipboard, sem entrada remota.
+[Arquitetura](docs/ARCHITECTURE.md), [protocolo](docs/PROTOCOL.md), [testes e pendências](docs/TESTING.md). Contrato e exemplos são idênticos aos do desktop. Kotlin 0.2.4 funciona com desktop 0.2.x; desktop 0.1.x conserva volume, mídia e clipboard, sem entrada remota.
 
 O [template CI](docs/ci/github-actions.yml) testa Kotlin, executa lint e gera APK sem Node. A credencial GitHub disponível não tem escopo `workflow`; para ativá-lo, publique em `.github/workflows/build.yml` com autenticação apropriada.
 
 A versão 0.2.1 corrige a recópia de texto recebido, estabelece baseline no ganho de foco, evita escritas idênticas e detalha erros de clipboard. Há uma [fixture opcional de validação](verification/clipboard-probe/README.md), separada do APK distribuído.
 
 A versão 0.2.3 inclui a correção de fechamento do leitor QR da 0.2.2 e revisa pareamento, falhas de gravação protegida, troca de rede e informações da sessão de mídia. Atualize instalando o APK sobre a versão Kotlin anterior; o pareamento salvo é preservado quando a assinatura corresponde. O leitor requer Google Play Services e pode precisar baixar seu módulo na primeira utilização; pareamento manual funciona sem esse módulo.
+
+A versão 0.2.4 confirma o volume alterado por teclado ou acessibilidade, desativa entrada ao sair da tela de controle e descarta previews de clipboard quando a conexão termina.
+
+A revisão de 15/10/2026 está documentada na [auditoria de segurança](docs/SECURITY-AUDIT.md) e no [relatório de bugs e regressões](docs/BUG-AUDIT-2026-10-15.md), com evidências e limites da validação.

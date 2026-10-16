@@ -2,7 +2,7 @@
 
 | Componente | Versão usada |
 |---|---|
-| Android Kotlin / desktop | 0.2.3-kotlin / 0.2.1 |
+| Android Kotlin / Android RN / desktop | 0.2.4-kotlin / 0.2.1 / 0.2.2 |
 | Protocolo | 1 + extensão opcional input.v1 |
 | Android Gradle Plugin | 9.2.1 |
 | Kotlin integrado ao AGP | 2.2.10, confirmado por buildEnvironment |
@@ -12,15 +12,18 @@
 | SDK platform / Build Tools | android-37.0 / 37.0.0 |
 | OkHttp / Google Play Services Code Scanner | 4.12.0 / 16.1.0 |
 | JUnit / JSON de testes | 4.13.2 / 20250517 |
-| Comparação React Native main | RN 0.87.1, app 0.2.0 ARM64 |
+| Comparação histórica React Native main | RN 0.87.1, app 0.2.0 ARM64 |
 
 Versões diretas são exatas no Gradle. Esta branch não utiliza package-lock, Hermes, Expo, React, Compose ou NDK. Kotlin integrado ao AGP não recebe plugin separado. Target 36 conserva INTERNET/NSD; elevar para 37 requer permissão contextual de rede local conforme a [documentação Android](https://developer.android.com/privacy-and-security/local-network-permission).
 
+## Compatibilidade entre versões
+
 | Android | Desktop | Compatibilidade |
 |---|---|---|
-| Kotlin 0.2.3-kotlin | 0.2.x | Volume, mídia, clipboard; input.v1 após consentimento |
-| Kotlin 0.2.3-kotlin | 0.1.x | Volume, mídia e clipboard; sem mouse/teclado |
-| React Native main 0.2.x | 0.2.x | Mesmo contrato e capacidades |
+| Kotlin 0.2.4-kotlin / React Native 0.2.1 | 0.2.2 | Protocolo 1; input.v1 após consentimento nos dois aplicativos |
+| Kotlin 0.2.4-kotlin / React Native 0.2.1 | 0.2.0–0.2.1 | Mesmo contrato de volume, mídia, clipboard e input.v1 |
+| Kotlin 0.2.0–0.2.3-kotlin / React Native 0.2.0 | 0.2.x | Compatibilidade anterior preservada; input.v1 após consentimento |
+| Clientes Android 0.2.x | 0.1.x | Volume, mídia e clipboard; sem mouse/teclado |
 | Qualquer implementação | Sem protocolo 1 | Incompatível; rejeitado |
 
 A matriz descreve contrato; capacidades do dispositivo/player definem os controles reais. Não equivale a certificação de todos os players/hardwares.

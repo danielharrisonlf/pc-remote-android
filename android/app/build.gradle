@@ -14,8 +14,8 @@ android {
         applicationId 'com.pcremote.nativeandroid'
         minSdk 24
         targetSdk 36
-        versionCode 5
-        versionName '0.2.3-kotlin'
+        versionCode 6
+        versionName '0.2.4-kotlin'
     }
     signingConfigs {
         release {

@@ -37,7 +37,10 @@ class MainActivity : Activity() {
     private val client: RemoteController get() = (application as RemoteApplication).client
     private var unsubscribe: (() -> Unit)? = null
     private var state = UiState()
-    private var page = Page.HOME
+    private val navigation = PageNavigation { client.disableInput(); volumeInteraction.finish() }
+    private var page: Page
+        get() = navigation.page
+        set(value) { navigation.goTo(value) }
     private var rendering = false
     private var lastSharedText = ""
     private var qrError = ""
@@ -95,7 +98,11 @@ class MainActivity : Activity() {
     private lateinit var addressPort: EditText
     private lateinit var reconnect: Button
 
-    private enum class Page { HOME, PAIR, SETTINGS }
+    private val volumeInteraction by lazy {
+        VolumeInteraction(client::beginVolume, client::updateVolume, client::endVolume,
+            { task, delay -> root.postDelayed(task, delay); Unit },
+            { task -> root.removeCallbacks(task); Unit })
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -104,6 +111,7 @@ class MainActivity : Activity() {
         unsubscribe = client.observe { next -> runOnUiThread {
             val changed = state.forDisplay() != next.forDisplay()
             state = next // Always retain the real revisions for actions and state reconciliation.
+            if (next.status != "Conectado" || next.snapshot?.audio?.available != true) volumeInteraction.cancel()
             if (changed) render()
         } }
         client.receiveShare(intent)
@@ -123,6 +131,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        volumeInteraction.finish()
         client.background()
         super.onPause()
     }
@@ -141,7 +150,8 @@ class MainActivity : Activity() {
         setIntent(intent)
         if (intent.action == Intent.ACTION_SEND) lastSharedText = ""
         client.receiveShare(intent)
-        page = Page.HOME
+        navigation.newIntent()
+        volumeInteraction.finish()
         render()
     }
 
@@ -203,11 +213,11 @@ class MainActivity : Activity() {
                 minimumHeight = dp(52)
                 contentDescription = "Volume do PC, de zero a cem por cento"
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                    override fun onStartTrackingTouch(seekBar: SeekBar) { client.beginVolume(seekBar.progress) }
+                    override fun onStartTrackingTouch(seekBar: SeekBar) { volumeInteraction.startTouch(seekBar.progress) }
                     override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                        if (fromUser) { volumeValue.text = "$progress%"; client.updateVolume(progress) }
+                        if (fromUser) { volumeValue.text = "$progress%"; volumeInteraction.change(progress) }
                     }
-                    override fun onStopTrackingTouch(seekBar: SeekBar) { client.endVolume(seekBar.progress) }
+                    override fun onStopTrackingTouch(seekBar: SeekBar) { volumeInteraction.stopTouch(seekBar.progress) }
                 })
             }
             addView(volume)
