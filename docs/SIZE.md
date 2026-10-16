@@ -8,7 +8,9 @@ Medido nos arquivos gerados em 15/10/2026. MB = 1.000.000 bytes; MiB = 1.048.576
 | Kotlin sizeBaseline, sem R8 | 2409747 | 2.410 | 2.298 |
 | React Native main 0.2.0 ARM64 entregue | 20195433 | 20.195 | 19.260 |
 
-Kotlin otimizado: **97.0% menor** que o React Native entregue. Sem R8: **88.1% menor**.
+Código atual, com o redesign e ainda sem versão publicada: release **671821 bytes** (0.672 MB, 0.641 MiB) e sizeBaseline 2503235 bytes (2.503 MB, 2.387 MiB), medidos em 16/10/2026. Os ícones vetoriais e as telas novas somam 71832 bytes ao release.
+
+Kotlin 0.2.4 otimizado: **97.0% menor** que o React Native entregue. Sem R8: **88.1% menor**.
 
 A comparação inclui decisões de build: React Native entregue usa release ARM64 com sua configuração original; Kotlin usa release universal com R8/redução de recursos. sizeBaseline conserva o código Kotlin e assinatura, mas desliga as duas otimizações. Não se atribui toda a redução apenas à linguagem Kotlin.
 
@@ -18,7 +20,7 @@ São tamanhos do download APK, não espaço instalado, dados/cache ou RAM. Insta
 
 ## Reprodução
 
-Na branch native/kotlin, pasta android:
+Na pasta android:
 
 ```powershell
 .\gradlew.bat testDebugUnitTest assembleRelease assembleSizeBaseline lintRelease

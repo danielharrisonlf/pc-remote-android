@@ -63,5 +63,13 @@ interface RemoteController {
     fun disableInput()
     fun movePointer(dx: Float, dy: Float)
     fun cancelPointerMotion()
+    /** Wheel steps from drag gestures; positive scrolls up, like the protocol. */
+    fun scroll(steps: Int)
+    fun cancelScroll()
     fun isInputTextAllowed(text: String): Boolean
+    /** Round trip of a state read in milliseconds, or null when it fails. */
+    fun ping(completion: (Long?) -> Unit)
+    fun clearReceived()
+    fun clearError()
+    fun savedFingerprint(): String?
 }

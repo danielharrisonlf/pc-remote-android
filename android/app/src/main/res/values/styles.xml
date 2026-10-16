@@ -1,1 +1,22 @@
-<resources><style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar"><item name="android:fontFamily">sans</item><item name="android:colorAccent">#245AE8</item><item name="android:windowLightStatusBar">true</item><item name="android:windowActionModeOverlay">true</item><item name="android:windowBackground">#F6F7FB</item></style></resources>
+<resources>
+  <!-- Colors match Palette in Theme.kt; the window shows them before the first frame. -->
+  <style name="Theme.PcRemote.Light" parent="android:style/Theme.Material.Light.NoActionBar">
+    <item name="android:colorAccent">#4F50D6</item>
+    <item name="android:colorPrimary">#4F50D6</item>
+    <item name="android:windowLightStatusBar">true</item>
+    <item name="android:windowActionModeOverlay">true</item>
+    <item name="android:windowBackground">#F3F5F8</item>
+    <item name="android:statusBarColor">#F3F5F8</item>
+    <item name="android:navigationBarColor">#FFFFFF</item>
+  </style>
+  <style name="Theme.PcRemote.Dark" parent="android:style/Theme.Material.NoActionBar">
+    <item name="android:colorAccent">#9FA3FF</item>
+    <item name="android:colorPrimary">#9FA3FF</item>
+    <item name="android:windowLightStatusBar">false</item>
+    <item name="android:windowActionModeOverlay">true</item>
+    <item name="android:windowBackground">#0E1114</item>
+    <item name="android:statusBarColor">#0E1114</item>
+    <item name="android:navigationBarColor">#161A1F</item>
+  </style>
+  <style name="AppTheme" parent="Theme.PcRemote.Light" />
+</resources>

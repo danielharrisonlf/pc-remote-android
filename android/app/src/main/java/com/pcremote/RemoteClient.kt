@@ -87,6 +87,7 @@ class RemoteClient(context: Context) : RemoteController {
   private data class Activation(val generation:Int,val revision:Long,val completion:(String?)->Unit,var acked:Boolean=false,var fresh:Boolean=false,var timeout:Runnable?=null)
   private var activation:Activation?=null
   private val motion = InputMotion(main,{ canInput() },{ dx,dy,done -> request(RemoteAction.PointerMove(dx,dy),done) },{ fail(it) })
+  private val scrollMotion = ScrollMotion({ canInput() },{ steps,done -> request(RemoteAction.PointerScroll(steps),done) },{ fail(it) })
   private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener { main.post { localClipboardChanged() } }
   private var discovery: NsdManager.DiscoveryListener? = null
   private var currentNetwork: Network? = null
@@ -536,7 +537,7 @@ class RemoteClient(context: Context) : RemoteController {
   }
   private fun dropInput() {
     activation?.let { a -> a.timeout?.let(main::removeCallbacks); activation=null; a.completion("Controle interrompido."); startInputDisarm() }
-    inputGeneration++; discretePending=false; motion.cancel(); patch { it.copy(inputArmed=false,inputActivating=false) }
+    inputGeneration++; discretePending=false; motion.cancel(); scrollMotion.cancel(); patch { it.copy(inputArmed=false,inputActivating=false) }
   }
   override fun enableInput(completion:(String?)->Unit) = run {
     if(inputNeedsDisarm && !inputDisarming) startInputDisarm()
@@ -578,6 +579,15 @@ class RemoteClient(context: Context) : RemoteController {
   }
   override fun movePointer(dx:Float,dy:Float) = run { motion.move(dx,dy) }
   override fun cancelPointerMotion() = run { motion.cancel() }
+  override fun scroll(steps:Int) = run { scrollMotion.add(steps) }
+  override fun cancelScroll() = run { scrollMotion.cancel() }
+  override fun ping(completion:(Long?)->Unit) = run {
+    val started=android.os.SystemClock.elapsedRealtime()
+    request(RemoteAction.StateGet) { error -> completion(if(error==null) android.os.SystemClock.elapsedRealtime()-started else null) }
+  }
+  override fun clearReceived() = run { if(view.receivedText.isNotEmpty()) patch { it.copy(receivedText="") } }
+  override fun clearError() = run { if(view.error.isNotEmpty()) patch { it.copy(error="") } }
+  override fun savedFingerprint():String? = (endpoint ?: store.restore())?.fingerprint?.takeIf { it.isNotEmpty() }
   override fun isInputTextAllowed(text:String)=Protocol.validText(text,1024,true)
   override fun selectSession(id:String)=run { if(view.snapshot?.sessions?.any { it.id==id }==true) patch { it.copy(selectedSessionId=id) } }
 }

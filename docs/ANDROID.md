@@ -1,6 +1,6 @@
-# Android Kotlin nativo 0.2.3
+# Android Kotlin nativo
 
-Branch `native/kotlin`; `main` conserva React Native. Views nativas, Kotlin integrado ao AGP e cliente global na Application. Sem Compose, React Native, WebView, Node ou NDK. Pacote `com.pcremote.nativeandroid` permite coexistência, com credenciais/preferências independentes.
+Views nativas, Kotlin integrado ao AGP e cliente global na Application. Sem Compose, React Native, WebView, Node ou NDK. Pacote `com.pcremote.nativeandroid`, com credenciais e preferências próprias.
 
 ## Build e assinatura
 
@@ -29,6 +29,10 @@ NsdManager descobre _pcremote._tcp. INTERNET, ACCESS_NETWORK_STATE, ACCESS_WIFI_
 
 QR usa Google Play Services Code Scanner 16.1.0; módulo pode ser baixado externamente. Sem Play Services, o pareamento por código continua disponível. POST_NOTIFICATIONS é solicitado contextual no Android 13+ ao habilitar PC→celular; recusar não impede uso em foco.
 
+## Atualizações
+
+ReleaseChecker lê `https://api.github.com/repos/danielharrisonlf/pc-remote-android/releases?per_page=30` com OkHttp, sem token. Aceita só tags `vX.Y.Z-kotlin` publicadas e links em github.com; rascunhos e tags do React Native ficam de fora. Compara com o versionName instalado e escolhe o APK que não seja `unminified`. O download abre no navegador; o Android pede autorização para instalar e preserva pareamento e preferências quando a assinatura é a mesma. Sem conexão ou com limite da API, a aba Conexão mostra o motivo.
+
 ## Clipboard e ciclo de vida
 
 ClipboardManager observa somente com app em foco. Retomar/habilitar direção estabelece baseline sem enviar conteúdo anterior. ACTION_SEND text/plain funciona em abertura inicial e onNewIntent. Texto recebido/compartilhado fica em RAM; não existe histórico ou replay. Sync inicia desligada, com direção consentida nos dois apps. Aplicação automática exige preferência e foco real.
@@ -37,8 +41,8 @@ Android 10+ não permite ler cópias de outros apps em segundo plano; serviço e
 
 EXTRA_IS_SENSITIVE impede envio de conteúdo marcado, inclusive leitura manual. Isso não identifica toda senha. Limite 64 KiB UTF-8; Unicode e quebras preservados; NUL/UTF-16 inválido rejeitados. UUID/revisão, ordem autoritativa do PC e supressão de eco impedem loops. Sem imagens/arquivos, abertura de links ou colagem em aplicativos.
 
-Pause cancela entrada e descoberta; callbacks de rede/backoff fazem nova autenticação e snapshot. Sem replay ou garantia de execução durante Doze. Reconectar explícito retoma tentativas depois de desconexão manual. Interface tem tema do sistema, texto em sp, alvos de 52dp, scroll e insets; Android 13+ usa OnBackInvokedCallback e versões anteriores fallback. Lint não utiliza baseline global para esconder erros. Testes físicos pendentes em TESTING.md.
+Pause cancela entrada e descoberta; callbacks de rede/backoff fazem nova autenticação e snapshot. Sem replay ou garantia de execução durante Doze. Reconectar explícito retoma tentativas depois de desconexão manual. Interface com tema claro, escuro ou do sistema, texto em sp, alvos de pelo menos 48dp, scroll e insets de ponta a ponta; Android 13+ usa OnBackInvokedCallback e versões anteriores fallback. Lint não utiliza baseline global para esconder erros. Testes físicos pendentes em TESTING.md.
 
 ## Diagnóstico do leitor QR
 
-Se aparecer aviso de módulo indisponível, conecte o celular à internet para que o Google Play Services prepare o leitor e tente novamente; não é necessária conta do PC Remote. O controle do PC continua pela LAN. Se os serviços estiverem desabilitados ou desatualizados, corrija essa condição ou use os campos manuais. Cancelar o leitor retorna ao pareamento sem encerrar o aplicativo. A versão 0.2.2 corrigiu construtores do ML Kit removidos pelo R8; preserve as regras específicas de proguard-rules.pro ao gerar novas builds. A 0.2.3 mantém a correção.
+Se aparecer aviso de módulo indisponível, conecte o celular à internet para que o Google Play Services prepare o leitor e tente novamente; não é necessária conta do PC Remote. O controle do PC continua pela LAN. Se os serviços estiverem desabilitados ou desatualizados, corrija essa condição ou use o código. Cancelar o leitor retorna ao pareamento sem encerrar o aplicativo. A versão 0.2.2 corrigiu construtores do ML Kit removidos pelo R8; preserve as regras específicas de proguard-rules.pro ao gerar novas builds. A 0.2.3 mantém a correção.

@@ -36,7 +36,7 @@ class QrScanBehaviorTest {
     )
 
     assertTrue(message.contains("Conecte à internet"))
-    assertTrue(message.contains("preencha os dados manualmente"))
+    assertTrue(message.contains("use o código"))
     assertFalse(message.contains(privateDetail))
   }
 
@@ -45,7 +45,7 @@ class QrScanBehaviorTest {
     val message = QrScanErrors.message(IllegalStateException("invite secret"))
 
     assertTrue(message.contains("Tente novamente"))
-    assertTrue(message.contains("preencha os dados manualmente"))
+    assertTrue(message.contains("use o código"))
     assertFalse(message.contains("invite secret"))
   }
 

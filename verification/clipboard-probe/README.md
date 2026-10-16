@@ -6,7 +6,7 @@ Use um emulador descartável. Em **Extended Controls → Settings → General**,
 
 ## Build e instalação da fixture
 
-Na raiz da branch native/kotlin, com JDK17 e SDK configurado:
+Na raiz do repositório, com JDK17 e SDK configurado:
 
 ```powershell
 .\android\gradlew.bat -p verification/clipboard-probe assembleDebug
@@ -17,7 +17,7 @@ A fixture usa applicationId `com.pcremote.validation`. Não possui acesso à red
 
 ## Estímulos reais
 
-Mantenha PC Remote Kotlin conectado e com foco antes de mudar o clipboard. Aguarde o foco: iniciar a Activity e escrever imediatamente pode fazer a amostra virar o baseline de retomada, corretamente sem upload.
+Mantenha o PC Remote conectado e com foco antes de mudar o clipboard. Aguarde o foco: iniciar a Activity e escrever imediatamente pode fazer a amostra virar o baseline de retomada, corretamente sem upload.
 
 ```powershell
 adb -s emulator-5554 shell am broadcast -n com.pcremote.validation/.ClipboardProbe --es mode unicode

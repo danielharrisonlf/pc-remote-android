@@ -18,18 +18,18 @@ internal class QrScanner {
     callback = completion
     try {
       if (GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(activity) != ConnectionResult.SUCCESS) {
-        deliver(null, "Atualize ou ative o Google Play Services para ler o QR. Você pode preencher os dados manualmente.")
+        deliver(null, "Atualize ou ative o Google Play Services para ler o QR, ou use o código.")
         return
       }
       val options = GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
       GmsBarcodeScanning.getClient(activity, options).startScan().addOnCompleteListener { task ->
         try {
           when {
-            task.isCanceled -> deliver(null, "Leitura cancelada. Você pode preencher os dados manualmente.")
+            task.isCanceled -> deliver(null, "Leitura cancelada.")
             !task.isSuccessful -> deliver(null, QrScanErrors.message(task.exception))
             else -> {
               val invite = task.result.rawValue?.let(Protocol::parseInvite)
-              deliver(invite, if (invite == null) "QR incompatível. Gere um novo convite no PC ou preencha os dados manualmente." else null)
+              deliver(invite, if (invite == null) "QR incompatível. Gere um novo no PC ou use o código." else null)
             }
           }
         } catch (error: Exception) {
@@ -67,18 +67,18 @@ internal object QrScanErrors {
       ?: (error?.cause as? com.google.android.gms.common.api.ApiException)
     return when {
       mlKit != null && (mlKit.errorCode == MlKitException.CODE_SCANNER_CANCELLED || mlKit.errorCode == MlKitException.CANCELLED) ->
-        "Leitura cancelada. Você pode preencher os dados manualmente."
+        "Leitura cancelada."
       api != null && api.statusCode == com.google.android.gms.common.api.CommonStatusCodes.CANCELED ->
-        "Leitura cancelada. Você pode preencher os dados manualmente."
+        "Leitura cancelada."
       mlKit != null && mlKit.errorCode == MlKitException.CODE_SCANNER_UNAVAILABLE ->
-        "Leitor de QR ainda não está disponível. Conecte à internet, aguarde o módulo do Google Play Services e tente novamente; ou preencha os dados manualmente."
+        "Leitor de QR ainda indisponível. Conecte à internet e tente de novo em instantes, ou use o código."
       mlKit != null && mlKit.errorCode == MlKitException.CODE_SCANNER_GOOGLE_PLAY_SERVICES_VERSION_TOO_OLD ->
-        "Atualize o Google Play Services para ler o QR. Você pode preencher os dados manualmente."
+        "Atualize o Google Play Services para ler o QR, ou use o código."
       mlKit != null && mlKit.errorCode == MlKitException.CODE_SCANNER_CAMERA_PERMISSION_NOT_GRANTED ->
-        "O leitor não conseguiu acessar a câmera. Verifique as permissões do Google Play Services ou preencha os dados manualmente."
+        "O leitor não acessou a câmera. Verifique as permissões do Google Play Services ou use o código."
       mlKit != null && mlKit.errorCode == MlKitException.CODE_SCANNER_TASK_IN_PROGRESS ->
-        "Outra leitura já está em andamento. Aguarde ou preencha os dados manualmente."
-      else -> "Não foi possível abrir o leitor de QR. Tente novamente ou preencha os dados manualmente."
+        "Outra leitura já está aberta."
+      else -> "Não foi possível abrir o leitor de QR. Tente novamente ou use o código."
     }
   }
 }

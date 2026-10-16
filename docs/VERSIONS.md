@@ -14,7 +14,7 @@
 | JUnit / JSON de testes | 4.13.2 / 20250517 |
 | Comparação histórica React Native main | RN 0.87.1, app 0.2.0 ARM64 |
 
-Versões diretas são exatas no Gradle. Esta branch não utiliza package-lock, Hermes, Expo, React, Compose ou NDK. Kotlin integrado ao AGP não recebe plugin separado. Target 36 conserva INTERNET/NSD; elevar para 37 requer permissão contextual de rede local conforme a [documentação Android](https://developer.android.com/privacy-and-security/local-network-permission).
+Versões diretas são exatas no Gradle. O projeto não utiliza package-lock, Hermes, Expo, React, Compose ou NDK. Kotlin integrado ao AGP não recebe plugin separado. Target 36 conserva INTERNET/NSD; elevar para 37 requer permissão contextual de rede local conforme a [documentação Android](https://developer.android.com/privacy-and-security/local-network-permission).
 
 ## Compatibilidade entre versões
 

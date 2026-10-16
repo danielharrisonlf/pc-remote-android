@@ -1,13 +1,19 @@
-# Arquitetura — alternativa Kotlin 0.2.3
+# Arquitetura — Android Kotlin
 
-Android e Windows são repositórios independentes. A branch native/kotlin é alternativa dentro do Android; não altera main nem cria monorepo. Protocolo 1 + input.v1 é o único contrato, com desktop Rust/Tauri 0.2.1 existente.
+Android e Windows são repositórios independentes. Protocolo 1 + input.v1 é o único contrato com o desktop Rust/Tauri 0.2.x.
 
 | Arquivo | Responsabilidade |
 |---|---|
 | RemoteApplication.kt | Singleton fora do ciclo de vida das telas |
 | Models.kt | DTOs, estado, ações tipadas e RemoteController |
-| MainActivity.kt | Views de controle, pareamento/configurações, acessibilidade e ciclo de vida |
-| TouchPadView.kt | Gestos nativos com cancelamento |
+| MainActivity.kt | Casca: barra superior, abas, aviso de atualização, insets, tema e ciclo de vida |
+| Theme.kt / UiKit.kt | Paleta clara/escura com os papéis de cor do desktop e fábrica de Views |
+| Shell.kt | Abas, barra de navegação, snackbar, folhas em Dialog e painéis na própria janela |
+| TouchpadScreen.kt / MediaScreen.kt / ClipboardScreen.kt / ConnectionScreen.kt | Uma tela por aba |
+| TouchPadView.kt | Gestos nativos com aceleração, rolagem com dois dedos e faixa de rolagem |
+| ScrollMotion.kt | Rolagem em lotes, um pedido em voo |
+| Releases.kt / ReleaseNotes.kt | Consulta ao GitHub Releases e notas em Markdown simples |
+| Fingerprint.kt | Faixa de cores e blocos da identidade, iguais aos do desktop |
 | RemoteClient.kt | WSS/pinning, autenticação, reconexão, ACK/timeouts, NSD, clipboard, share e avisos |
 | ClipboardTracker.kt | Baseline em foco, supressão de eco e recópias sem histórico |
 | CredentialStore.kt / CommittedValue.kt | Android Keystore/AES-GCM; falhas de gravação não expõem credencial candidata |
@@ -16,7 +22,7 @@ Android e Windows são repositórios independentes. A branch native/kotlin é al
 | Protocol.kt | Validação estrita, limites, dedup/revisões e convite QR |
 | InputMotion.kt | Acumulação fracionária, coalescência e um movimento em voo |
 
-Activity mostra estado do cliente sem manter conexão numa tela. Gerações invalidam callbacks/comandos após troca de sessão. Sem pendências persistidas ou replay. Slider limita envio a 10Hz e aguarda ACK/estado final. Entrada exige permissão PC e ativação confirmada; perder foco desarma.
+Activity mostra estado do cliente sem manter conexão numa tela. Gerações invalidam callbacks/comandos após troca de sessão. Sem pendências persistidas ou replay. Slider limita envio a 10Hz e aguarda ACK/estado final. Entrada exige permissão PC e ativação confirmada; perder o foco da janela desarma. Por isso o painel de digitação fica dentro da janela principal; só folhas usadas fora do controle (pareamento, atualização) são Dialogs.
 
 Toda execução Windows permanece em Rust: Core Audio, GSMTC, SendInput e listener nativo do clipboard. Fechar janela desktop mantém serviço na bandeja. Identidade Windows é protegida por DPAPI; revogação remove token e fecha sessão. Descoberta apenas informa endereço; certificado fixado e hostname validado autenticam o transporte.
 
