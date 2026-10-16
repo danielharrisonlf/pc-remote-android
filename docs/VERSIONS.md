@@ -2,7 +2,7 @@
 
 | Componente | Versão usada |
 |---|---|
-| Android / desktop | 0.4.0-kotlin / 0.4.0 |
+| Android / desktop | 0.5.0-kotlin (versionCode 9) / 0.4.0 |
 | Protocolo | 1 + extensões opcionais input.v1 e files.v1 |
 | Android Gradle Plugin | 9.2.1 |
 | Kotlin integrado ao AGP | 2.2.10, confirmado por buildEnvironment |
@@ -20,10 +20,10 @@ Versões diretas são exatas no Gradle. O projeto não utiliza package-lock, Her
 
 | Android | Desktop | Compatibilidade |
 |---|---|---|
-| 0.4.0-kotlin | 0.4.0 | Protocolo 1; input.v1 após consentimento nos dois aplicativos; files.v1 com **Receber imagens e PDFs do celular** ligado no PC |
-| 0.4.0-kotlin | 0.2.x e 0.3.0 | input.v1, volume (também pelas teclas físicas), mídia e clipboard; Arquivos pede para atualizar o PC e nenhum pedido de arquivo é enviado |
+| 0.4.0 e 0.5.0-kotlin | 0.4.0 | Protocolo 1; input.v1 após consentimento nos dois aplicativos; files.v1 com **Receber imagens e PDFs do celular** ligado no PC |
+| 0.4.0 e 0.5.0-kotlin | 0.2.x e 0.3.0 | input.v1, volume (também pelas teclas físicas), mídia e clipboard; Arquivos pede para atualizar o PC e nenhum pedido de arquivo é enviado |
 | 0.2.0–0.3.0-kotlin | 0.4.0 | Contrato anterior preservado; o PC não anuncia `file.transfer` nem envia o estado `files` |
-| 0.2.x–0.4.0-kotlin | 0.1.x | Volume, mídia e clipboard; sem mouse/teclado |
+| 0.2.x–0.5.0-kotlin | 0.1.x | Volume, mídia e clipboard; sem mouse/teclado |
 | Qualquer implementação | Sem protocolo 1 | Incompatível; rejeitado |
 
-A matriz descreve contrato; capacidades do dispositivo/player definem os controles reais. Não equivale a certificação de todos os players/hardwares.
+A 0.5.0 não muda o protocolo: a atualização dentro do app conversa só com o GitHub. Permissões novas: REQUEST_INSTALL_PACKAGES e UPDATE_PACKAGES_WITHOUT_USER_ACTION. A matriz descreve contrato; capacidades do dispositivo/player definem os controles reais. Não equivale a certificação de todos os players/hardwares.

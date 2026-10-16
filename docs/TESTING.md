@@ -2,6 +2,37 @@
 
 Registro da alternativa 0.2.0-kotlin em 14/10/2026. Os resultados React Native da branch main não são apresentados como testes desta implementação. Integrações reais: Android SDK/Keystore/OkHttp e Windows Rust/Core Audio/GSMTC/clipboard/SendInput. Não há simulações no produto.
 
+## Atualização 0.5.0-kotlin — atualização dentro do app, 16/10/2026
+
+### Testes automatizados
+
+- `testDebugUnitTest assembleDebug assembleRelease assembleSizeBaseline lintRelease`: sucesso. **92 testes JUnit passaram**, sem falhas. Lint release: zero erros e 26 avisos; o mesmo lint sobre a 0.4.0, no mesmo ambiente e data, dá 28. Saíram três SetTextI18n da folha antiga e entrou um AndroidGradlePluginVersion, que depende da data; nenhum aviso nos arquivos novos. O R8 passou sem regra nova de keep e manteve os nomes de UpdateInstallReceiver e UpdatedReceiver.
+- Testes novos: UpdateRulesTest (14) cobre a lista de origens e redirecionamentos (outro repositório, `..`, `%2e`, query, HTTP, outra porta, userinfo), a origem de teste, o formato do SHA256SUMS, a identidade do APK (pacote, versionCode, assinatura), a limpeza do cache, as mensagens de falha da sessão, a máquina de estados (download automático para em pronta; o toque instala; Agora não desliga a instalação automática; cancelar mantém o arquivo) e os textos do aviso e do botão. ReleasesTest ganhou 2 (SHA256SUMS da mesma versão e origem de teste) e passou a exigir arquivos deste repositório.
+- Manifesto mesclado do release sem `networkSecurityConfig` nem `debuggable`; o APK release não tem o XML de rede da build debug.
+
+### Ponta a ponta no emulador API 33
+
+AVD PCRemote_API33 (Google APIs x86_64). A cópia de teste anterior foi desinstalada. APK debug 0.5.0 (versionCode 9) instalado com `adb`; builds de teste 0.5.1 a 0.5.7 (versionCode 10 a 16) com a mesma chave debug, e uma 0.5.1 reassinada com uma chave descartável. Um servidor Python em 10.0.2.2:8765 imitou a lista de releases, os SHA256SUMS e o redirecionamento 302 do GitHub; o app foi apontado para ele com `files/debug-releases-url.txt`, escrito por `run-as`.
+
+1. **Versão encontrada** e download automático no Wi-Fi sem limite, com progresso no aviso ("Baixando a versão 0.5.1… 20%"), na barra da folha ("1,1 de 3,1 MB") e no botão ("Baixando… 35%").
+2. **SHA-256 divergente**: "O APK baixado não confere com o SHA-256 publicado. Nada foi instalado."; arquivo apagado.
+3. **Outra assinatura**: "O APK baixado tem assinatura diferente da do app instalado. Nada foi instalado."
+4. **Redirecionamento para 127.0.0.1**: "O download foi desviado para um endereço não permitido."; o app não conectou ao destino.
+5. **0.5.1 válida por download automático** (com um redirecionamento permitido): aviso **Atualização pronta — toque para instalar**, versionCode ainda 9.
+6. **Instalar agora**: permissão de notificações do Android 13, explicação e "Instalar apps desconhecidos". Voltar sem permitir mostrou a recusa na folha e não instalou. Com "Permitir desta fonte", a instalação seguiu sozinha ao voltar.
+7. **Sem confirmação do sistema já na primeira vez**: 0.5.0 → 0.5.1 instalou sem tela do Android (atualização do próprio app com UPDATE_PACKAGES_WITHOUT_USER_ACTION). `dumpsys package` passou a mostrar `installerPackageName=com.pcremote.nativeandroid`. O sistema encerrou o processo, o UpdatedReceiver publicou "PC Remote atualizado para 0.5.1" e tocar abriu a 0.5.1; cache vazio.
+8. **0.5.1 → 0.5.2 manual** (download automático desligado): nada baixado antes do toque; Atualizar agora baixou, conferiu e instalou **sem confirmação do sistema**. 0.5.2 → 0.5.3 e 0.5.3 → 0.5.4 também.
+9. **Confirmação do sistema**: o Android 13 permite uma atualização silenciosa por app a cada 30 s. Atualizar de novo 13 s depois gerou `STATUS_PENDING_USER_ACTION` e o app abriu "Do you want to update this app?" em primeiro plano. Cancelar mostrou "Instalação cancelada." e Instalar agora, reusando o arquivo conferido sem novo download; Update instalou a 0.5.7.
+10. **Rede limitada** (Wi-Fi desligado, dados móveis): com o automático ligado, nenhum pedido de APK ou SHA256SUMS. De volta ao Wi-Fi o download começou, e uma "0.5.8" com o mesmo versionCode instalado foi recusada: "O APK baixado não é mais novo que a versão instalada."
+11. **Dispensar esta versão** escondeu o aviso.
+12. **Release 0.5.0 (R8)**: `run-as` recusado (não debuggable), arquivo de teste ignorado, nenhum pedido ao servidor falso; consulta ao GitHub real: "Você está na versão mais recente."
+
+Android 12 (AVD PCRemote_API31): 0.5.0 → 0.5.1 e 0.5.1 → 0.5.2 também instalaram sem confirmação do sistema depois de "Permitir desta fonte", com o aviso de atualizado.
+
+Achados corrigidos durante o teste: mensagens da atualização ficavam atrás da folha (Dialog) e agora aparecem nela; o cliente de atualização não reaproveita conexões e tenta de novo uma vez se a conexão cair; o ícone pequeno da notificação usava o ícone do launcher, que aparecia como um quadrado. O NAT do emulador corta o fim de respostas quando o servidor fecha logo após uma escrita rápida: o app recusou o arquivo incompleto, como deve, e o servidor de teste passou a esperar 0,5 s antes de fechar.
+
+Não testado: celular físico, Android 7 a 11 (sempre com confirmação do sistema), Android 14+ (dono da atualização), download de uma release real do GitHub, processo encerrado no meio do download e TalkBack. Capturas e dumps ficaram fora do repositório.
+
 ## Atualização 0.4.0-kotlin — touchpad persistente, teclas de volume e files.v1, 16/10/2026
 
 ### Ponta a ponta no emulador, com o desktop real
