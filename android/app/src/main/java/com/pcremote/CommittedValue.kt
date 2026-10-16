@@ -8,9 +8,9 @@ internal class CommittedValue(
   private var overridden = false
   private var previousValue: String? = null
 
-  @Synchronized fun read(): String? = if (overridden) previousValue else readBacking()
+  fun read(): String? = if (overridden) previousValue else readBacking()
 
-  @Synchronized fun write(value: String?) {
+  fun write(value: String?) {
     val previous = read()
     try {
       if (!commitBacking(value)) throw IllegalStateException("Could not commit protected storage")

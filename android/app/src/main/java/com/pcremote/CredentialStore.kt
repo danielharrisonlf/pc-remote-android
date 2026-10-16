@@ -28,7 +28,7 @@ internal class CredentialStore(private val prefs: SharedPreferences) {
       .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).setKeySize(256).build())
     return generator.generateKey()
   }
-  @Synchronized fun persist(e: PairedComputer) {
+  fun persist(e: PairedComputer) {
     val value = JSONObject().put("host", e.host).put("port", e.port).put("fingerprint", e.fingerprint)
       .put("deviceId", e.deviceId).put("deviceName", e.deviceName).put("pcId", e.pcId).put("pcName", e.pcName).put("token", e.token).toString().toByteArray(Charsets.UTF_8)
     val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -36,10 +36,10 @@ internal class CredentialStore(private val prefs: SharedPreferences) {
     val blob = cipher.iv + cipher.doFinal(value)
     blobStore.write(Base64.encodeToString(blob, Base64.NO_WRAP))
   }
-  @Synchronized fun clear() {
+  fun clear() {
     blobStore.write(null)
   }
-  @Synchronized fun restore(): PairedComputer? {
+  fun restore(): PairedComputer? {
     val blob = blobStore.read() ?: return null
     return try {
       val bytes = Base64.decode(blob, Base64.DEFAULT)

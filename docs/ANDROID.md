@@ -1,25 +1,44 @@
-# Android 0.1.0: implementação e limites
+# Android Kotlin nativo 0.2.3
 
-O app usa React Native Community CLI 0.87.1, React 19.2.3, TypeScript estrito, New Architecture, Hermes e componentes nativos. Expo Go não executa o módulo Kotlin obrigatório. Um development build Expo poderia hospedar um módulo local, mas adicionaria outra camada de prebuild sem resolver TLS pinning, KeyStore, NSD, clipboard e share intents; o Community CLI mantém essas integrações auditáveis no projeto Android. Dependências JS: Zod 4.6.7, Safe Area Context 5.10.1, Slider 5.2.1. O transporte usa OkHttp 4.12.0 e o scanner QR usa Play Services Code Scanner 16.1.0.
-
-## Permissões e pareamento
-
-Internet, acesso/estado Wi-Fi e multicast habilitam LAN e descoberta mDNS. A descoberta oferece somente o endereço do PC. O código temporário de oito dígitos e o fingerprint SHA-256 exibidos na janela Windows precisam ser confirmados; o QR reúne os mesmos campos. O scanner do Google Play Services pode requerer download do módulo de câmera pelo Play Services; use os campos manuais quando indisponível. A notificação é solicitada ao habilitar PC → celular em Android 13+. A ausência dessa permissão impede o aviso em segundo plano, não a transferência enquanto o app está ativo.
-
-O WebSocket usa internamente `wss://pc-remote.local:43127/v1/ws`. Um Dns exclusivo do cliente direciona o nome ao IPv4 selecionado, enquanto o verificador padrão do OkHttp valida o SAN pc-remote.local do certificado. O trust manager dessa conexão aceita somente o certificado cujo SHA-256 DER confere com a identidade confirmada e cuja validade está correta; não modifica validação global. A credencial individual chega após aprovação no PC, fica cifrada com chave AES-256-GCM do Android Keystore em CredentialStore e nunca é passada ao JavaScript. A identidade não é inferida do mDNS. O backup do app está desativado. Uma reconexão autentica de novo e pede snapshot recente; comandos pendentes são descartados. Reconexão do mesmo dispositivo substitui sua sessão anterior sem apagar a credencial válida.
-
-## Área de transferência
-
-Os controles de sincronização começam desligados. Envio automático observa alterações apenas com o app em foco e direção celular → PC habilitada. Ao abrir ou retomar o app, não envia texto preexistente. O botão **Enviar para o PC** lê o texto atual ou o texto recebido via menu Compartilhar; o último tem prioridade até o envio. **Copiar do PC** solicita uma leitura explícita no Windows. Eventos recebidos aparecem no app, com botão de copiar. A aplicação automática no clipboard Android é uma preferência separada e funciona somente em foco. Se um evento chegar enquanto o app ainda mantém conexão em segundo plano, uma notificação genérica abre o app; o texto da cópia não aparece nela. A suspensão do Android pode encerrar essa conexão.
-
-`EXTRA_IS_SENSITIVE` impede envio automático e leitura manual de conteúdo marcado pelo Android. Isso não detecta todo segredo ou senha. O limite é 64 KiB em UTF-8; NUL e texto acima do limite são recusados. A escrita no clipboard Android suprime o eco do próprio listener. Não há histórico persistente nem replay após reconexão. Somente texto simples é transferido. Não se abrem URLs nem se colam textos automaticamente em outro app.
+Branch `native/kotlin`; `main` conserva React Native. Views nativas, Kotlin integrado ao AGP e cliente global na Application. Sem Compose, React Native, WebView, Node ou NDK. Pacote `com.pcremote.nativeandroid` permite coexistência, com credenciais/preferências independentes.
 
 ## Build e assinatura
 
-Use Node 22+, JDK 17 e Android SDK com `platforms;android-37.0`, build-tools 37.0.0 e NDK 27.1.12297006. `npm ci`, `npm run typecheck`, `npm test`, depois `cd android && gradlew.bat :app:assembleRelease`. O APK release inclui o bundle JavaScript e funciona sem Metro. Sem credenciais de assinatura de produção, a variante release usa a chave debug local gerada pelo Android SDK e serve apenas para validação. Para distribuir, crie um keystore próprio fora do repositório e forneça `PCREMOTE_KEYSTORE_PATH`, `PCREMOTE_KEY_ALIAS`, `PCREMOTE_STORE_PASSWORD`, `PCREMOTE_KEY_PASSWORD` no ambiente antes da build. Preserve a chave para atualizações. Nunca versionar keystore ou senhas. O identificador do pacote é `com.pcremote`.
+JDK 17; SDK com platform-tools, platforms;android-37.0 e build-tools;37.0.0. Configure ANDROID_HOME/ANDROID_SDK_ROOT ou android/local.properties (não versionar). Na pasta android:
 
-Em Windows, Ninja pode exceder o limite de 260 caracteres no caminho de arquivos C++ gerados. Nesse caso, execute `subst R: "C:\caminho\para\pc-remote-android"`, abra `R:\android` e rode a build dali. Após a build, use `subst R: /D`. O Metro usa o caminho real e o caminho curto para resolver as dependências. Escolha uma letra de unidade livre.
+```powershell
+.\gradlew.bat testDebugUnitTest assembleRelease lintRelease
+.\gradlew.bat assembleSizeBaseline
+```
 
-## Verificação em dispositivo real
+Linux/macOS: `bash gradlew`. Android Studio pode abrir a pasta android. Release funciona sem servidor de desenvolvimento. Saídas em app/build/outputs/apk/release e app/build/outputs/apk/sizeBaseline. sizeBaseline desliga R8/redução de recursos para comparação. APK universal, sem bibliotecas JNI por ABI. JUnit usa debug: testReleaseUnitTest não é criada nesta configuração do AGP.
 
-Confirmar em um Android com Google Play Services e PC Windows na mesma rede: QR e código manual; aprovação/negação/revogação; volume/mudo com alterações externas no PC; sessões de mídia e capacidades; Compartilhar texto com app aberto e fechado; Unicode e quebras; proteção de conteúdo sensível; alternância foco/segundo plano; suspensão/rede; build release instalada sem Metro. Testes JS cobrem validação de mensagens e limites de texto, mas não substituem essas verificações.
+Sem credenciais de produção, release usa chave debug do SDK, somente avaliação. Gere um keystore próprio fora do Git:
+
+```powershell
+keytool -genkeypair -v -keystore C:\seguro\pc-remote.jks -alias pcremote -keyalg RSA -keysize 3072 -validity 10000
+```
+
+Forneça todas as variáveis: PCREMOTE_KEYSTORE_PATH, PCREMOTE_KEY_ALIAS, PCREMOTE_STORE_PASSWORD, PCREMOTE_KEY_PASSWORD, em ambiente seguro. Não versionar chaves/senhas. Preserve a chave para atualizar instalações. Outra assinatura exige desinstalar esta avaliação e parear novamente. Verifique com `apksigner verify --verbose app-release.apk`.
+
+## Integrações e permissões
+
+RemoteClient usa OkHttp 4.12.0 e trust manager exclusivo da conexão: SHA-256 do DER confirmado no PC e certificado válido. Verificador padrão valida SAN pc-remote.local; DNS dedicado aponta ao IPv4 selecionado. Sem alteração global da validação TLS. Token recebido após aprovação fica em AES-GCM com chave Android Keystore; backup desativado.
+
+NsdManager descobre _pcremote._tcp. INTERNET, ACCESS_NETWORK_STATE, ACCESS_WIFI_STATE e CHANGE_WIFI_MULTICAST_STATE atendem LAN/descoberta. Target 36: antes de elevar para 37, implementar ACCESS_LOCAL_NETWORK contextual ou seletor do sistema. Firewall Windows deve permitir servidor somente nas redes desejadas, normalmente privadas; sem configuração de roteador.
+
+QR usa Google Play Services Code Scanner 16.1.0; módulo pode ser baixado externamente. Sem Play Services, pareamento manual continua disponível. POST_NOTIFICATIONS é solicitado contextual no Android 13+ ao habilitar PC→celular; recusar não impede uso em foco.
+
+## Clipboard e ciclo de vida
+
+ClipboardManager observa somente com app em foco. Retomar/habilitar direção estabelece baseline sem enviar conteúdo anterior. ACTION_SEND text/plain funciona em abertura inicial e onNewIntent. Texto recebido/compartilhado fica em RAM; não existe histórico ou replay. Sync inicia desligada, com direção consentida nos dois apps. Aplicação automática exige preferência e foco real.
+
+Android 10+ não permite ler cópias de outros apps em segundo plano; serviço em primeiro plano não elimina a regra. Não há serviço permanente. Notificação genérica só pode avisar de evento que chegou enquanto conexão existia; suspensão pode interrompê-la. Abra o app ou use Compartilhar.
+
+EXTRA_IS_SENSITIVE impede envio de conteúdo marcado, inclusive leitura manual. Isso não identifica toda senha. Limite 64 KiB UTF-8; Unicode e quebras preservados; NUL/UTF-16 inválido rejeitados. UUID/revisão, ordem autoritativa do PC e supressão de eco impedem loops. Sem imagens/arquivos, abertura de links ou colagem em aplicativos.
+
+Pause cancela entrada e descoberta; callbacks de rede/backoff fazem nova autenticação e snapshot. Sem replay ou garantia de execução durante Doze. Reconectar explícito retoma tentativas depois de desconexão manual. Interface tem tema do sistema, texto em sp, alvos de 52dp, scroll e insets; Android 13+ usa OnBackInvokedCallback e versões anteriores fallback. Lint não utiliza baseline global para esconder erros. Testes físicos pendentes em TESTING.md.
+
+## Diagnóstico do leitor QR
+
+Se aparecer aviso de módulo indisponível, conecte o celular à internet para que o Google Play Services prepare o leitor e tente novamente; não é necessária conta do PC Remote. O controle do PC continua pela LAN. Se os serviços estiverem desabilitados ou desatualizados, corrija essa condição ou use os campos manuais. Cancelar o leitor retorna ao pareamento sem encerrar o aplicativo. A versão 0.2.2 corrigiu construtores do ML Kit removidos pelo R8; preserve as regras específicas de proguard-rules.pro ao gerar novas builds. A 0.2.3 mantém a correção.

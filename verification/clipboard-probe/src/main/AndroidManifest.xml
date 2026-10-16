@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application android:label="PC Remote — fixture de testes" android:allowBackup="false">
+    <receiver android:name=".ClipboardProbe" android:exported="true" />
+    <activity android:name=".ClipboardInspection" android:exported="true" />
+  </application>
+</manifest>

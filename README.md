@@ -1,90 +1,66 @@
-# PC Remote Android
+# PC Remote Android — Kotlin nativo
 
-Aplicativo Android nativo em React Native + TypeScript para controlar o PC na LAN. Este repositório é independente do `pc-remote-desktop`. Versão 0.2.1, protocolo 1. Não usa WebView, Expo Go, nuvem, login, root, ADB ou acessibilidade para operar.
+Versão **0.2.4-kotlin**, branch **native/kotlin**. A branch `main` conserva React Native. Esta alternativa usa Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao mesmo desktop Rust/Tauri pela LAN, com protocolo 1 e extensão `input.v1`.
 
-## Baixar e instalar — versão 0.2.1
+## Baixar e instalar
 
 | Aplicativo | Download |
 |---|---|
-| Android ARM64 — celular compatível | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.1/pc-remote-android-0.2.1-arm64-evaluation.apk) |
+| Android Kotlin — APK universal, Android 7/API24+ | [Baixar APK Kotlin](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.4-kotlin/pc-remote-android-kotlin-0.2.4-evaluation.apk) |
 | Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.2.2/pc-remote-desktop-0.2.2-x64-setup.exe) |
-| Android x86_64 — emulador | [Baixar APK para emulador](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.1/pc-remote-android-0.2.1-x86_64-evaluation.apk) |
-| Android Kotlin — alternativa universal, branch native/kotlin | [Baixar APK Kotlin](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.4-kotlin/pc-remote-android-kotlin-0.2.4-evaluation.apk) |
+| Android React Native — alternativa ARM64 | [Baixar APK React Native](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.1/pc-remote-android-0.2.1-arm64-evaluation.apk) |
+| Android React Native — alternativa x86_64 para emulador | [Baixar APK React Native x86_64](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.1/pc-remote-android-0.2.1-x86_64-evaluation.apk) |
 
-Os downloads estão nas Releases privadas: entre no GitHub com uma conta que tenha acesso aos dois repositórios. As páginas de [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.2.1) e [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.2.2) também incluem os hashes SHA-256.
+Downloads em repositórios privados: entre no GitHub com uma conta autorizada. Veja a [release Kotlin](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.2.4-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.2.2). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
 
-Instale o `.exe` no Windows e abra o PC Remote pela bandeja. No celular, abra o APK ARM64 pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte ambos à mesma rede local, inicie o pareamento no PC, escaneie o QR ou informe os dados exibidos e confirme o pedido no Windows. Os aplicativos instalados não precisam de Metro, Expo Go ou ferramentas de desenvolvimento.
+Instale o `.exe` no PC e abra o APK pelo gerenciador de arquivos do celular, autorizando a fonte quando solicitado. A versão Kotlin aparece como **PC Remote Kotlin**, pacote `com.pcremote.nativeandroid`, e pode coexistir com React Native. Cada app precisa de pareamento próprio; somente um controlador pode ficar conectado por PC. O uso não requer Metro, Expo Go, root, ADB, acessibilidade ou teclado especial.
 
-Esta é uma versão de avaliação: APK assinado com chave debug e instalador sem Authenticode. A validação em celular físico e players reais permanece pendente; consulte [testes e limitações](docs/TESTING.md).
+## Tamanho
 
-## Escolha da arquitetura
+**APK final: 599989 bytes (0.600 MB), aproximadamente 97.0% menor que os 20.20 MB do React Native entregue.** Sem R8: 2.410 MB.
 
-React Native **0.87.1**, React **19.2.3**, Community CLI **20.2.0**, New Architecture e Hermes, verificados no registro npm em 14/10/2026. O Expo estável **57.0.28** acompanha RN 0.86, enquanto SDK 58 ainda está no canal `next`. Expo development build com módulo local seria viável; escolhemos Community CLI para manter a versão estável atual do RN sem misturar versões incompatíveis. Kotlin fornece o transporte com identidade TLS fixada, armazenamento Keystore e integrações que precisam acessar flags e ciclo de vida nativos. Interface e regras de interação continuam em React Native/TypeScript estrito.
+Veja [SIZE.md](docs/SIZE.md) para bytes exatos, hashes e comparação das builds Kotlin com e sem R8 e do APK React Native entregue. O tamanho do download difere do espaço instalado e do consumo de RAM. O scanner QR opcional pode baixar módulos externos do Google Play Services, que não fazem parte do APK.
 
-Fontes: [RN versões](https://reactnative.dev/versions), [criação sem framework](https://reactnative.dev/docs/getting-started-without-a-framework), [matriz Expo](https://docs.expo.dev/versions/latest/). Dependências exatas estão no `package-lock.json`; detalhes nativos em [ANDROID.md](docs/ANDROID.md).
+## Desenvolvimento e build
 
-## Pré-requisitos e desenvolvimento
-
-Node LTS >=22.11, JDK 17, Android Studio/SDK conforme `android/build.gradle`, Android 7/API24+; Android 10+ recomendado para restrições modernas do clipboard. Configure `ANDROID_HOME` para o SDK e instale platform-tools, plataforma, Build Tools e NDK das versões registradas no Gradle. Use aparelho ou emulador para desenvolvimento. ADB é ferramenta de desenvolvimento, não requisito do usuário final.
+JDK 17 e Android SDK: `platform-tools`, `platforms;android-37.0`, `build-tools;37.0.0`. Não requer Node/npm ou NDK. Versões em [VERSIONS.md](docs/VERSIONS.md).
 
 ```powershell
-git clone https://github.com/danielharrisonlf/pc-remote-android.git
-cd pc-remote-android
-npm ci
-npm run typecheck
-npm test -- --runInBand
-npm start
-# Em outro terminal, aparelho/emulador pronto:
-npm run android
+git clone --branch native/kotlin https://github.com/danielharrisonlf/pc-remote-android.git
+cd pc-remote-android\android
+.\gradlew.bat testDebugUnitTest assembleRelease lintRelease
+# Comparação sem R8:
+.\gradlew.bat assembleSizeBaseline
 ```
 
-## APK com JavaScript embutido
+No Linux/macOS, use `bash gradlew`. Também pode abrir `android` no Android Studio. APK final: `android/app/build/outputs/apk/release/app-release.apk`. Sem as quatro variáveis de assinatura, release usa a chave debug gerada pelo SDK. Para distribuição forneça seu keystore fora do Git. Instruções em [ANDROID.md](docs/ANDROID.md).
 
-```powershell
-cd android
-.\gradlew.bat assembleRelease
-```
+## Pareamento e uso
 
-Saída em `android/app/build/outputs/apk/release/`. Essa variante inclui o bundle JS e não usa Metro. A configuração de assinatura e as variáveis exatas estão em [ANDROID.md](docs/ANDROID.md). Uma build de avaliação com chave debug deve ser explicitamente identificada; para distribuição use seu próprio keystore fora do repositório. Gere uma chave com `keytool`, forneça caminho/alias/senhas por variáveis de ambiente injetadas pelo seu ambiente de build e guarde backup seguro. Não publique chaves ou senhas. Sem a mesma chave não será possível atualizar uma instalação existente assinada.
+No PC, abra **Adicionar celular**. Escaneie o QR no Android ou informe endereço, porta, código temporário e **impressão digital exibida no PC**. Aprove o pedido no Windows. Descoberta mDNS preenche endereço, sem estabelecer confiança. WSS usa certificado fixado por SHA-256, validação normal do hostname e credenciais individuais cifradas pelo Android Keystore.
 
-Instale o APK no celular pelo gerenciador de arquivos, autorizando a instalação dessa fonte quando solicitado. O aplicativo Windows deve estar em execução na mesma LAN. Não há dependência de ferramentas de desenvolvimento depois de instalado.
+Volume e mudo refletem o Windows; o slider limita a frequência e confirma o valor final. Selecione a sessão de mídia desejada. Reproduzir/pausar, faixa anterior/próxima e posição **−10s/+10s** têm capacidades distintas; ações indisponíveis ficam desabilitadas, com explicação. Veja [compatibilidade de mídia](docs/MEDIA-COMPATIBILITY.md); não se promete controle de todo player.
 
-## Uso
+**Enviar texto copiado** lê a cópia atual do Android. **Enviar ao PC** envia o campo de texto, inclusive texto de **Compartilhar → PC Remote Kotlin**. **Ler do PC** solicita a cópia Windows; **Copiar no celular** aplica o texto recebido. Esses envios manuais funcionam com sincronização desligada.
 
-Abra pareamento no PC, use descoberta ou endereço manual, escaneie o QR ou informe o código e **fingerprint exibidos no PC**, e aprove no Windows. Nome do PC e conexão aparecem no controle. Volume/mudo refletem o Windows; sessão de mídia pode ser selecionada. Faixa anterior/próxima são diferentes dos botões de posição **−10s/+10s**, disponíveis somente quando o player expõe essa capacidade.
+Sync começa desligada. Cada direção exige consentimento no celular e no desktop; pausa rápida interrompe ambas. Aplicação automática no Android é outra opção, inicialmente desligada. Texto fica em RAM, sem histórico persistente ou logs de conteúdo. Limite **64 KiB UTF-8**, preservando Unicode e quebras; NUL/Unicode inválido são recusados. Conteúdo sinalizado sensível é bloqueado; nem todas as senhas podem ser detectadas.
 
-**Enviar para o PC** envia o texto copiado no Android; **Copiar do PC** solicita o clipboard atual do Windows e oferece copiar o conteúdo recebido. Também é possível usar **Compartilhar → PC Remote** em outro aplicativo. Conteúdo compartilhado com o PC desconectado permanece somente na tela, em RAM, para envio explícito; não é reenviado ao reconectar.
+Android 10+ restringe leitura do clipboard de outros apps em segundo plano. Abra o aplicativo ou use **Compartilhar**. Sem serviço permanente ou garantia de conexão durante suspensão. Eventos que chegam antes da suspensão podem apresentar aviso genérico, quando autorizado. Texto antigo não é reenviado ao parear, reconectar, retomar ou habilitar sync. Atualizar clipboard não abre links, executa comandos ou cola em apps.
 
-A sincronização começa desligada. Ative separadamente celular→PC e PC→celular em configurações e autorize as direções no desktop. Pausar interrompe ambas. Aplicação automática no Android é outra opção, desligada por padrão e restrita a quando o app tem foco. Preferências persistem; texto recebido não forma histórico persistente.
+## Touchpad e teclado
 
-## Limites reais do Android
+No Windows, habilite **Permitir mouse e teclado pelo celular**. No Android, toque em **Ativar entrada**. Arraste/toque no touchpad para mover/clicar; use os botões de clique direito, duplo, rolagem e teclas. Texto exige envio explícito, até **1.024 bytes UTF-8** por comando. O alvo é a janela em foco no Windows; não há transmissão da tela. Sair do app, desconectar ou suspender desativa entrada e exige ativação nova. Aplicativos elevados/telas protegidas podem bloquear SendInput. Veja [INPUT.md](docs/INPUT.md).
 
-Android 10+ não permite ler clipboard de outros apps em segundo plano. Abra o PC Remote ou use **Compartilhar**. Um serviço em primeiro plano não elimina essa restrição. O MVP não mantém serviço permanente; a conexão pode cair ao suspender, e retoma com novo estado ao abrir. Eventos recebidos enquanto o processo ainda está ativo podem apresentar notificação genérica, se autorizada; não há entrega garantida durante suspensão. Conteúdo antigo não é transferido ao retomar, habilitar sync ou parear.
+## Documentação e testes
 
-Texto até **64 KiB UTF-8**, preservando acentos, emojis e quebras; NUL é rejeitado. Texto marcado `EXTRA_IS_SENSITIVE` é bloqueado; a plataforma não marca todas as senhas. Não existe sincronização de imagens/arquivos, abertura automática de links, colagem em aplicativos ou execução remota de comandos.
+[Arquitetura](docs/ARCHITECTURE.md), [protocolo](docs/PROTOCOL.md), [testes e pendências](docs/TESTING.md). Contrato e exemplos são idênticos aos do desktop. Kotlin 0.2.4 funciona com desktop 0.2.x; desktop 0.1.x conserva volume, mídia e clipboard, sem entrada remota.
 
-Veja [protocolo](docs/PROTOCOL.md), [arquitetura](docs/ARCHITECTURE.md), [compatibilidade de mídia](docs/MEDIA-COMPATIBILITY.md) e [testes/pendências](docs/TESTING.md).
+O [template CI](docs/ci/github-actions.yml) testa Kotlin, executa lint e gera APK sem Node. A credencial GitHub disponível não tem escopo `workflow`; para ativá-lo, publique em `.github/workflows/build.yml` com autenticação apropriada.
 
-## Touchpad e teclado remoto
+A versão 0.2.1 corrige a recópia de texto recebido, estabelece baseline no ganho de foco, evita escritas idênticas e detalha erros de clipboard. Há uma [fixture opcional de validação](verification/clipboard-probe/README.md), separada do APK distribuído.
 
-1. No Windows, abra **Transferência** (ou **Controles rápidos** na Visão geral) e ligue **Permitir mouse e teclado pelo celular**. A opção começa desligada.
-2. No Android, abra a aba **Touchpad** e toque em **Ativar touchpad** nesta conexão.
-3. Um dedo move o cursor e um toque clica. Dois dedos rolam a página e um toque com dois dedos é o clique direito. A faixa à direita do touchpad rola como uma barra de rolagem. Os botões de clique ficam na base da tela, junto das teclas Esc, Tab, Enter, Espaço, setas, Apagar e duplo clique. O botão de teclado abre um campo com prévia para revisar o texto antes de enviar.
-4. O alvo é o aplicativo em foco no Windows. Selecione a janela desejada antes de enviar texto. O controle não exibe a tela do PC.
-5. Para interromper, toque em **Desligar** no celular, use **Interromper agora** em Transferência ou na Visão geral do Windows, ou o menu da bandeja. Bloquear a permissão no PC também interrompe o controle.
+A versão 0.2.3 inclui a correção de fechamento do leitor QR da 0.2.2 e revisa pareamento, falhas de gravação protegida, troca de rede e informações da sessão de mídia. Atualize instalando o APK sobre a versão Kotlin anterior; o pareamento salvo é preservado quando a assinatura corresponde. O leitor requer Google Play Services e pode precisar baixar seu módulo na primeira utilização; pareamento manual funciona sem esse módulo.
 
-A ativação é descartada ao desconectar, suspender ou colocar o Android em segundo plano. É necessário ativar novamente; movimentos, cliques e textos pendentes não são repetidos. Texto digitado fica somente em RAM e não entra em logs/histórico. O limite por envio é **1.024 bytes UTF-8**, sem caracteres de controle; use os botões Enter e Tab para essas teclas. Aplicativos elevados, tela de bloqueio/UAC e algumas interfaces podem recusar entrada. Teclas físicas pressionadas no PC podem interferir. Veja [INPUT.md](docs/INPUT.md) para detalhes e validações.
-
-## Atualizações
-
-O Windows consulta `releases/latest` de `pc-remote-desktop` ao abrir e no intervalo escolhido em **Configurações → Atualizações** (1 h, 6 h, 24 h ou manual; padrão 6 h). O resultado fica em cache para respeitar o limite de 60 consultas/h da API pública. Com versão nova, aparece **Versão X disponível** no cabeçalho; o diálogo mostra as notas e abre o instalador no navegador. Nada é instalado sem confirmação, e só URLs de releases deste projeto podem ser abertas pelo comando `open_url`.
-
-O Android consulta `pc-remote-android` ao abrir e a cada 6 horas em primeiro plano, ignora tags `-kotlin` e escolhe o APK da arquitetura do aparelho (ARM64 ou x86_64 no emulador). O banner **Ver novidades** abre as notas e o download do APK no navegador.
-
-Enquanto o repositório for privado, a API pública responde 404: a verificação automática fica silenciosa e a manual explica o motivo. Publique as releases (ou torne o repositório público) para o aviso funcionar.
-
-## Integração contínua
-
-O modelo reproduzível está em [docs/ci/github-actions.yml](docs/ci/github-actions.yml). Ele executa testes e gera artefatos de avaliação. A autenticação GitHub disponível nesta entrega não possui o escopo `workflow`, portanto o modelo não está ativo. Para ativá-lo, com uma autenticação autorizada para workflows, mova o arquivo para `.github/workflows/build.yml` e publique esse commit. Os builds e testes locais estão registrados em [docs/TESTING.md](docs/TESTING.md).
+A versão 0.2.4 confirma o volume alterado por teclado ou acessibilidade, desativa entrada ao sair da tela de controle e descarta previews de clipboard quando a conexão termina.
 
 A revisão de 15/10/2026 está documentada na [auditoria de segurança](docs/SECURITY-AUDIT.md) e no [relatório de bugs e regressões](docs/BUG-AUDIT-2026-10-15.md), com evidências e limites da validação.
