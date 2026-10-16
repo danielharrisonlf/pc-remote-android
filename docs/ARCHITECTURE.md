@@ -1,6 +1,6 @@
 # Arquitetura — Android Kotlin
 
-Android e Windows são repositórios independentes. Protocolo 1 + input.v1 é o único contrato com o desktop Rust/Tauri 0.2.x.
+Android e Windows são repositórios independentes. Protocolo 1 + input.v1 é o único contrato com o desktop Rust/Tauri 0.2.x e 0.3.0.
 
 | Arquivo | Responsabilidade |
 |---|---|

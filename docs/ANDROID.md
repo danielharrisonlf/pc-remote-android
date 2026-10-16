@@ -31,7 +31,7 @@ QR usa Google Play Services Code Scanner 16.1.0; módulo pode ser baixado extern
 
 ## Atualizações
 
-ReleaseChecker lê `https://api.github.com/repos/danielharrisonlf/pc-remote-android/releases?per_page=30` com OkHttp, sem token. Aceita só tags `vX.Y.Z-kotlin` publicadas e links em github.com; rascunhos e tags do React Native ficam de fora. Compara com o versionName instalado e escolhe o APK que não seja `unminified`. O download abre no navegador; o Android pede autorização para instalar e preserva pareamento e preferências quando a assinatura é a mesma. Sem conexão ou com limite da API, a aba Conexão mostra o motivo.
+ReleaseChecker lê `https://api.github.com/repos/danielharrisonlf/pc-remote-android/releases?per_page=30` com OkHttp, sem token. Aceita só tags `vX.Y.Z-kotlin` publicadas e links em github.com; rascunhos ficam de fora. Compara com o versionName instalado e escolhe o APK que não seja `unminified`. O download abre no navegador; o Android pede autorização para instalar e preserva pareamento e preferências quando a assinatura é a mesma. Sem conexão ou com limite da API, a aba Conexão mostra o motivo.
 
 ## Clipboard e ciclo de vida
 

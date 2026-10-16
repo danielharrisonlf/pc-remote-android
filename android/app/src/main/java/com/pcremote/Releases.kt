@@ -33,9 +33,8 @@ internal sealed interface ReleaseLookup {
 }
 
 /**
- * GitHub Releases for this app. Kotlin builds are tagged `vX.Y.Z-kotlin` and
- * marked as prerelease, so `/releases/latest` (which skips prereleases and
- * returns the retired React Native app) is not used; the list is read instead.
+ * GitHub Releases for this app, tagged `vX.Y.Z-kotlin`. Builds up to 0.2.4 were
+ * published as prereleases, which `/releases/latest` skips, so the list is read.
  */
 internal object Releases {
   const val REPOSITORY = "danielharrisonlf/pc-remote-android"

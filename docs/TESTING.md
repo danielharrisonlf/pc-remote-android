@@ -2,12 +2,13 @@
 
 Registro da alternativa 0.2.0-kotlin em 14/10/2026. Os resultados React Native da branch main não são apresentados como testes desta implementação. Integrações reais: Android SDK/Keystore/OkHttp e Windows Rust/Core Audio/GSMTC/clipboard/SendInput. Não há simulações no produto.
 
-## Redesign da interface — 16/10/2026, ainda sem versão publicada
+## Atualização 0.3.0-kotlin — redesign da interface, 16/10/2026
 
 - **52 testes JUnit passaram**; `testDebugUnitTest assembleRelease assembleSizeBaseline lintRelease` concluídos. Lint: zero erros e 29 avisos. Testes novos cobrem navegação por abas, rolagem em lotes, leitura das releases do GitHub e notas de versão.
 - Emulador API 33 com o servidor TLS de teste: pareamento por convite injetado numa build de depuração temporária (removida antes do commit), touchpad ativo com gesto, teclas e painel de digitação (`keyboard.text` e `keyboard.key` chegaram ao servidor), mídia com duas sessões, Buscar do PC, temas claro e escuro, e a aba Conexão com latência e identidade.
 - Atualizações contra o GitHub real: com versionName temporário 0.2.3, o app encontrou v0.2.4-kotlin, mostrou o aviso, o ponto na aba Conexão e a folha com as notas e o botão de download.
 - Defeito achado neste teste e corrigido: a folha de digitação em Dialog tirava o foco da janela e desarmava a entrada. Ela passou a ser um painel na própria janela.
+- APK 0.3.0 assinado com o mesmo certificado da 0.2.4 (apksigner); instalado por cima da 0.2.4 no emulador, preservando os dados.
 - Pendentes: pareamento por código de ponta a ponta (o mDNS não chega ao emulador), leitura óptica de QR e celular físico.
 
 ## Atualização 0.2.4-kotlin — revisão de bugs, 15/10/2026
