@@ -136,4 +136,4 @@ Não há garantia de conexão em segundo plano ou leitura de cópias de outros a
 
 Na pasta android: `gradlew.bat testDebugUnitTest assembleRelease assembleSizeBaseline lintRelease`. Em Linux/macOS: `bash gradlew`. Consulte ANDROID.md para assinatura e SIZE.md para tamanhos/hashes.
 
-A main contém apenas o Android Kotlin; o React Native ficou no histórico e nas tags v0.1.0 a v0.2.1. O repositório desktop e o contrato permanecem independentes. Semantica não está disponível: decisões/evidências ficam nestes arquivos, sem alegar memória externa. O modelo CI está em docs/ci, pois a credencial GitHub não possui escopo workflow.
+A main contém apenas o Android Kotlin. As releases e tags do React Native foram excluídas em 16/10/2026; o código antigo existe só no histórico do Git. O repositório desktop e o contrato permanecem independentes. Semantica não está disponível: decisões/evidências ficam nestes arquivos, sem alegar memória externa. O modelo CI está em docs/ci, pois a credencial GitHub não possui escopo workflow.
