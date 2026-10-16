@@ -5,7 +5,10 @@ import org.json.JSONObject
 import java.util.UUID
 
 internal sealed interface Incoming {
-  data class Welcome(val id: String, val pcId: String, val pcName: String, val input: Boolean, val files: Boolean = false) : Incoming
+  /** [fileReceive] (file.receive) means the PC took files.v2; [os] comes from info.v1. */
+  data class Welcome(val id: String, val pcId: String, val pcName: String, val input: Boolean, val files: Boolean = false, val fileReceive: Boolean = false, val search: Boolean = false, val os: String = "") : Incoming
+  /** files.v2: the PC offers a file to this phone; the ticket opens /v1/files with file.fetch. */
+  data class FilePush(val transferId: String, val name: String, val size: Long, val mime: String, val ticket: String) : Incoming
   /** Sent before the ack of a file.offer; [id] is the offer request id. */
   data class FileTicket(val id: String, val transferId: String, val ticket: String, val chunkBytes: Int, val windowBytes: Int) : Incoming
   data class PairPending(val id: String) : Incoming
@@ -21,6 +24,8 @@ internal sealed interface FileMessage {
   data class Accept(val id: String, val transferId: String) : FileMessage
   data class Progress(val transferId: String, val received: Long) : FileMessage
   data class Done(val id: String, val transferId: String, val name: String) : FileMessage
+  /** PC → phone (files.v2): every byte was sent; [sha256] covers all of them. */
+  data class End(val id: String, val transferId: String, val sha256: String) : FileMessage
   data class Error(val id: String, val code: String, val message: String, val retryable: Boolean) : FileMessage
 }
 
@@ -45,7 +50,13 @@ internal object Protocol {
   private val tokenPattern = Regex("[a-fA-F0-9]{64}")
   private val lowerHex = Regex("[a-f0-9]{64}")
   private val errorCodes = setOf("invalid_message", "version_mismatch", "unauthorized", "pairing_expired", "pairing_denied", "rate_limited", "unavailable", "conflict", "sensitive", "too_large", "clipboard_busy", "internal", "file_type", "file_busy", "file_integrity", "storage")
-  private val capabilities = setOf("audio", "media", "clipboard.text", "input.control", "file.transfer")
+  private val capabilities = setOf("audio", "media", "clipboard.text", "input.control", "file.transfer", "file.receive", "search.youtube")
+  /** files.v2 MIME: lowercase type/subtype, informative only. */
+  private val mimePattern = Regex("[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+")
+  private val declineCodes = setOf("storage", "unavailable")
+  fun mimeValid(value: String): Boolean = value.length <= 127 && mimePattern.matches(value)
+  /** search.v1 query: 1..200 code points, no control characters, not only spaces. */
+  fun queryValid(value: String): Boolean = value.isNotBlank() && validText(value, 4096, true) && value.codePointCount(0, value.length) <= 200
   private val keys = setOf("enter", "backspace", "tab", "escape", "left", "right", "up", "down", "delete", "home", "end")
   fun uuid(value: String): Boolean = try { UUID.fromString(value).toString().equals(value, true) } catch (_: Exception) { false }
   fun validText(value: String, limit: Int = 65536, input: Boolean = false): Boolean {
@@ -112,7 +123,10 @@ internal object Protocol {
     val o = JSONObject(raw)
     if (number(o, "v") != 1L) return null
     when (str(o, "type")) {
-      "welcome" -> { exact(o, "v", "type", "id", "pcId", "pcName", "capabilities"); val arr = array(o,"capabilities"); if (arr.length() > 16) return null; val caps = (0 until arr.length()).map { arr.opt(it) as? String ?: return null }; if (!caps.all { it in capabilities }) return null; Incoming.Welcome(uid(o,"id"),uid(o,"pcId"),str(o,"pcName").also { if (!validText(it, 256)) return null },"input.control" in caps,"file.transfer" in caps) }
+      "welcome" -> { exactOptional(o, setOf("v", "type", "id", "pcId", "pcName", "capabilities"), setOf("os")); val arr = array(o,"capabilities"); if (arr.length() > 16) return null; val caps = (0 until arr.length()).map { arr.opt(it) as? String ?: return null }; if (!caps.all { it in capabilities }) return null
+        val os = if (o.has("os")) str(o,"os").also { if (!validText(it, 64, true)) return null } else ""
+        Incoming.Welcome(uid(o,"id"),uid(o,"pcId"),str(o,"pcName").also { if (!validText(it, 256)) return null },"input.control" in caps,"file.transfer" in caps,"file.receive" in caps,"search.youtube" in caps,os) }
+      "file.push" -> { exact(o,"v","type","transferId","name","size","mime","ticket"); Incoming.FilePush(uid(o,"transferId"),str(o,"name").also { if (!validText(it,255,true)) return null },number(o,"size").also { if (it<1 || it>FileRules.MAX_BYTES) return null },str(o,"mime").also { if (!mimeValid(it)) return null },str(o,"ticket").also { if (!lowerHex.matches(it)) return null }) }
       "file.ticket" -> { exact(o,"v","type","id","transferId","ticket","chunkBytes","windowBytes"); val chunk=signed(o,"chunkBytes",1,MAX_CHUNK); Incoming.FileTicket(uid(o,"id"),uid(o,"transferId"),str(o,"ticket").also { if (!lowerHex.matches(it)) return null },chunk,signed(o,"windowBytes",chunk,MAX_WINDOW)) }
       "pair.pending" -> { exact(o,"v","type","id"); Incoming.PairPending(uid(o,"id")) }
       "pair.result" -> { exact(o,"v","type","id","pcId","pcName","token"); Incoming.PairResult(uid(o,"id"),uid(o,"pcId"),str(o,"pcName").also { if (!validText(it,256)) return null },str(o,"token").also { if (!tokenPattern.matches(it)) return null }) }
@@ -150,6 +164,7 @@ internal object Protocol {
     when (str(o, "type")) {
       "file.accept" -> { exact(o,"v","type","id","transferId"); FileMessage.Accept(uid(o,"id"),uid(o,"transferId")) }
       "file.progress" -> { exact(o,"v","type","transferId","received"); FileMessage.Progress(uid(o,"transferId"),number(o,"received").also { if (it>FileRules.MAX_BYTES) return null }) }
+      "file.end" -> { exact(o,"v","type","id","transferId","sha256"); FileMessage.End(uid(o,"id"),uid(o,"transferId"),str(o,"sha256").also { if (!lowerHex.matches(it)) return null }) }
       "file.done" -> { exact(o,"v","type","id","transferId","name"); FileMessage.Done(uid(o,"id"),uid(o,"transferId"),str(o,"name").also { if (!validText(it,1024,true)) return null }) }
       "error" -> { exact(o,"v","type","id","code","message","retryable"); FileMessage.Error(uid(o,"id"),str(o,"code").also { if (it !in errorCodes) return null },str(o,"message").also { if (!validText(it,4096)) return null },bool(o,"retryable")) }
       else -> null
@@ -159,6 +174,16 @@ internal object Protocol {
     if (uuid(id) && uuid(transferId) && lowerHex.matches(ticket)) JSONObject().put("v",1).put("type","file.begin").put("id",id).put("transferId",transferId).put("ticket",ticket).toString() else null
   fun fileEnd(id: String, transferId: String, sha256: String): String? =
     if (uuid(id) && uuid(transferId) && lowerHex.matches(sha256)) JSONObject().put("v",1).put("type","file.end").put("id",id).put("transferId",transferId).put("sha256",sha256).toString() else null
+  /** Phone side of a files.v2 download. */
+  fun fileFetch(id: String, transferId: String, ticket: String): String? =
+    if (uuid(id) && uuid(transferId) && lowerHex.matches(ticket)) JSONObject().put("v",1).put("type","file.fetch").put("id",id).put("transferId",transferId).put("ticket",ticket).toString() else null
+  fun fileProgress(transferId: String, received: Long): String? =
+    if (uuid(transferId) && received in 0..FileRules.MAX_BYTES) JSONObject().put("v",1).put("type","file.progress").put("transferId",transferId).put("received",received).toString() else null
+  fun fileDone(id: String, transferId: String, name: String): String? =
+    if (uuid(id) && uuid(transferId) && validText(name,1024,true)) JSONObject().put("v",1).put("type","file.done").put("id",id).put("transferId",transferId).put("name",name).toString() else null
+  /** Error frame the phone sends on a download socket; [id] is the PC message it answers, or the nil UUID. */
+  fun fileError(id: String, code: String, message: String, retryable: Boolean): String? =
+    if (uuid(id) && code in errorCodes && validText(message,4096)) JSONObject().put("v",1).put("type","error").put("id",id).put("code",code).put("message",message).put("retryable",retryable).toString() else null
   fun action(a: RemoteAction): JSONObject? = try {
     when(a) {
       RemoteAction.StateGet -> JSONObject().put("kind","state.get")
@@ -175,8 +200,10 @@ internal object Protocol {
       is RemoteAction.PointerScroll -> if(a.steps in -10..10 && a.steps != 0) JSONObject().put("kind","pointer.scroll").put("steps",a.steps) else null
       is RemoteAction.KeyboardText -> if(validText(a.text,1024,true)) JSONObject().put("kind","keyboard.text").put("text",a.text) else null
       is RemoteAction.KeyboardKey -> if(a.key in keys) JSONObject().put("kind","keyboard.key").put("key",a.key) else null
-      is RemoteAction.FileOffer -> if(uuid(a.transferId) && FileRules.offerValid(a.name,a.size,a.mime)) JSONObject().put("kind","file.offer").put("transferId",a.transferId).put("name",a.name).put("size",a.size).put("mime",a.mime) else null
+      is RemoteAction.FileOffer -> if(uuid(a.transferId) && FileRules.offerValid(a.name,a.size,a.mime,a.twoWay)) JSONObject().put("kind","file.offer").put("transferId",a.transferId).put("name",a.name).put("size",a.size).put("mime",a.mime) else null
       is RemoteAction.FileCancel -> if(uuid(a.transferId)) JSONObject().put("kind","file.cancel").put("transferId",a.transferId) else null
+      is RemoteAction.FileDecline -> if(uuid(a.transferId) && a.code in declineCodes) JSONObject().put("kind","file.decline").put("transferId",a.transferId).put("code",a.code) else null
+      is RemoteAction.SearchOpen -> if(queryValid(a.query)) JSONObject().put("kind","search.open").put("service","youtube").put("query",a.query) else null
     }
   } catch (_: Exception) { null }
 }

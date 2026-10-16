@@ -17,7 +17,6 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
-import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -54,6 +53,8 @@ internal class MainActivity : Activity(), ScreenHost {
   private var unregisterBack: (() -> Unit)? = null
   private var pairingSheet: Sheet? = null
   private var pairingPanel: PairingPanel? = null
+  /** Runs once RECORD_AUDIO is granted. */
+  private var micGranted: (() -> Unit)? = null
 
   private lateinit var root: FrameLayout
   private lateinit var column: LinearLayout
@@ -81,15 +82,6 @@ internal class MainActivity : Activity(), ScreenHost {
       { task -> mainHandler.removeCallbacks(task); Unit })
   }
 
-  /** Pings only while the Conexão tab is on screen; it stops by itself elsewhere. */
-  private val latencyTask = object : Runnable {
-    override fun run() {
-      if (!resumed || navigation.tab != Tab.CONNECTION) return
-      measureLatency()
-      mainHandler.postDelayed(this, LATENCY_INTERVAL_MS)
-    }
-  }
-
   override fun onCreate(savedInstanceState: Bundle?) {
     prefs = UiPreferences(this)
     kit = Ui(this, Palette.resolve(this, prefs.theme))
@@ -111,9 +103,11 @@ internal class MainActivity : Activity(), ScreenHost {
     unsubscribe = remote.observe { next ->
       runOnUiThread {
         val changed = state.forDisplay() != next.forDisplay()
+        val started = (state.files.active == null && state.files.incoming == null) && (next.files.active != null || next.files.incoming != null)
         state = next // Always keep the real revisions for actions and reconciliation.
         if (next.status != "Conectado" || next.snapshot?.audio?.available != true) volumeInteraction.cancel()
         if (changed) render()
+        if (started) askTransferNotice()
       }
     }
     unsubscribeUpdates = updates.observe { flow, notice ->
@@ -142,7 +136,6 @@ internal class MainActivity : Activity(), ScreenHost {
     resumed = true
     remote.foreground(this)
     updates.attach(this)
-    restartLatency()
     if (awaitingInstallPermission) {
       awaitingInstallPermission = false
       when {
@@ -162,7 +155,7 @@ internal class MainActivity : Activity(), ScreenHost {
 
   override fun onPause() {
     resumed = false
-    mainHandler.removeCallbacks(latencyTask)
+    screens.values.forEach { it.pause() }
     volumeInteraction.finish()
     remote.background()
     updates.detach(this)
@@ -203,8 +196,18 @@ internal class MainActivity : Activity(), ScreenHost {
   }
 
   override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-    // Granted or not, the update goes on: the notice is only a convenience.
-    if (requestCode == NOTIFY_UPDATE) startUpdate() else super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    when (requestCode) {
+      // Granted or not, the update goes on: the notice is only a convenience.
+      NOTIFY_UPDATE -> startUpdate()
+      MICROPHONE -> {
+        val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+        val next = micGranted
+        micGranted = null
+        if (granted) next?.invoke() else snackbar.show("Sem o microfone, digite a pesquisa.", Tone.DANGER)
+      }
+      NOTIFY_FILES -> Unit
+      else -> super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    }
   }
 
   /**
@@ -220,7 +223,6 @@ internal class MainActivity : Activity(), ScreenHost {
   }
 
   private fun volumeKey(code: Int, repeat: Int) {
-    if (repeat == 0) haptic()
     val touchpad = navigation.tab == Tab.TOUCHPAD
     if (code == KeyEvent.KEYCODE_VOLUME_MUTE) {
       if (repeat > 0) return
@@ -238,11 +240,6 @@ internal class MainActivity : Activity(), ScreenHost {
     val next = VolumeKeys.step(current, code == KeyEvent.KEYCODE_VOLUME_UP)
     if (next != current) volumeInteraction.change(next)
     if (touchpad) snackbar.show("Volume do PC: $next%", Tone.ACCENT)
-  }
-
-  private fun restartLatency() {
-    mainHandler.removeCallbacks(latencyTask)
-    if (resumed && navigation.tab == Tab.CONNECTION) mainHandler.post(latencyTask)
   }
 
   @Deprecated("Handled for devices before Android 13")
@@ -263,7 +260,6 @@ internal class MainActivity : Activity(), ScreenHost {
     if (changed) hideKeyboard()
     navigation.goTo(tab)
     volumeInteraction.finish()
-    if (changed) restartLatency()
     render()
   }
 
@@ -281,15 +277,13 @@ internal class MainActivity : Activity(), ScreenHost {
 
     statusChip = kit.chip()
     title = kit.text("PC Remote", TextStyle.TITLE).apply { maxLines = 1; accessibilityHeading() }
+    // The theme lives in Conexão → Preferências; the bar keeps only the PC and its state.
     topBar = kit.row(8).apply {
       setPadding(kit.dp(20), kit.dp(12), kit.dp(8), kit.dp(12))
       addView(kit.column(6).apply {
         addView(title)
         addView(kit.row(8).apply { addView(statusChip) })
       }, kit.weighted())
-      addView(kit.iconButton(if (p.dark) R.drawable.ic_sun else R.drawable.ic_moon, if (p.dark) "Usar tema claro" else "Usar tema escuro") {
-        setTheme(if (p.dark) ThemeMode.LIGHT else ThemeMode.DARK)
-      })
     }
 
     bannerTitle = kit.text("", TextStyle.LABEL, p.accentText).apply { maxLines = 1 }
@@ -412,13 +406,6 @@ internal class MainActivity : Activity(), ScreenHost {
     } else if (state.error.isEmpty()) lastError = ""
   }
 
-  private fun measureLatency() {
-    if (state.status != "Conectado") { connection.setLatency(null); return }
-    remote.ping { ms ->
-      runOnUiThread { if (!isDestroyed) connection.setLatency(ms) }
-    }
-  }
-
   private fun hideKeyboard() {
     (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(root.windowToken, 0)
   }
@@ -427,18 +414,11 @@ internal class MainActivity : Activity(), ScreenHost {
 
   override fun notify(message: String, tone: Tone) = snackbar.show(message, tone)
 
-  override fun haptic() {
-    if (state.preferences.haptics) root.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-  }
-
   override fun result(error: String?, success: String?) {
     runOnUiThread {
       if (isDestroyed) return@runOnUiThread
       if (error != null) snackbar.show(error, Tone.DANGER)
-      else {
-        haptic()
-        success?.let { snackbar.show(it, Tone.SUCCESS) }
-      }
+      else success?.let { snackbar.show(it, Tone.SUCCESS) }
     }
   }
 
@@ -448,7 +428,6 @@ internal class MainActivity : Activity(), ScreenHost {
     val picker = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
       addCategory(Intent.CATEGORY_OPENABLE)
       type = "*/*"
-      putExtra(Intent.EXTRA_MIME_TYPES, FileRules.MIME_TYPES.toTypedArray())
       putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
     }
     try {
@@ -456,6 +435,43 @@ internal class MainActivity : Activity(), ScreenHost {
     } catch (_: ActivityNotFoundException) {
       snackbar.show("Nenhum seletor de arquivos disponível neste celular.", Tone.DANGER)
     }
+  }
+
+  override fun openFile(record: FileRecord) {
+    val uri = record.uri ?: return
+    val view = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(uri), record.mime.ifEmpty { FileRules.FALLBACK_MIME }).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    try {
+      startActivity(Intent.createChooser(view, record.name))
+    } catch (_: RuntimeException) {
+      snackbar.show("Nenhum app deste celular abre ${record.name}.", Tone.DANGER)
+    }
+  }
+
+  /** Asked on the first tap on the microphone; a permanent refusal leads to the app settings. */
+  override fun requestMicrophone(granted: () -> Unit) {
+    if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) { granted(); return }
+    if (prefs.askedMicrophone && !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
+      AlertDialog.Builder(this, dialogTheme(kit.palette))
+        .setTitle("Permitir o microfone")
+        .setMessage("Para falar comandos e pesquisas, permita o microfone para o PC Remote nos ajustes do Android. O microfone só fica ligado enquanto você fala.")
+        .setNegativeButton("Agora não", null)
+        .setPositiveButton("Abrir ajustes") { _, _ ->
+          try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } catch (_: ActivityNotFoundException) {}
+        }
+        .show()
+      return
+    }
+    prefs.askedMicrophone = true
+    micGranted = granted
+    requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), MICROPHONE)
+  }
+
+  /** Android 13+: asked once, the first time a file moves, so a finished transfer can be announced. */
+  private fun askTransferNotice() {
+    if (Build.VERSION.SDK_INT < 33 || !resumed || prefs.askedFilesNotice) return
+    if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+    prefs.askedFilesNotice = true
+    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFY_FILES)
   }
 
   override fun scanQr() {
@@ -607,7 +623,8 @@ internal class MainActivity : Activity(), ScreenHost {
     const val KEY_INSTALL_PERMISSION = "installPermission"
     const val NOTIFY_UPDATE = 42
     const val PICK_FILES = 41
-    const val LATENCY_INTERVAL_MS = 5000L
+    const val MICROPHONE = 43
+    const val NOTIFY_FILES = 44
     const val UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000L
     const val SNACKBAR_OFFSET_DP = 92
     val releases = ReleaseChecker()

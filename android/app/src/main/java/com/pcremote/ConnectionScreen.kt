@@ -10,7 +10,6 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
-import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.RadioButton
@@ -93,6 +92,7 @@ internal class PairingPanel(private val host: ScreenHost, private val onRequeste
           setTextColor(p.text)
           setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
           minHeight = ui.dp(52)
+          isHapticFeedbackEnabled = false
           buttonTintList = ColorStateList.valueOf(p.accent)
           isChecked = key(pc) == selected
         })
@@ -107,16 +107,17 @@ internal class PairingPanel(private val host: ScreenHost, private val onRequeste
   }
 }
 
+/**
+ * The paired PC in plain terms (name, state, system) and the few things to do with
+ * it. Identity checks still run on every connection; they just are not shown.
+ */
 internal class ConnectionScreen(private val host: ScreenHost) : Screen {
   private val ui = host.ui
   private val client = host.client
   private val p = ui.palette
   private var state = UiState()
-  private var editing = false
-  private var latency: Long? = null
-  private var renderedFingerprint: String? = null
 
-  // Pairing in progress.
+  // Pairing in progress: the colors are the one identity check the user makes.
   private val waitingTitle = ui.text("", TextStyle.TITLE)
   private val waitingStrip = FingerprintStripView(ui)
   private val waitingHint = ui.text("As cores devem ser iguais às do PC.", TextStyle.CAPTION, p.textSecondary)
@@ -138,34 +139,12 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
   }
 
   // Paired PC.
-  private val pcName = ui.text("", TextStyle.HEADLINE).apply { maxLines = 1 }
+  private val pcName = ui.text("", TextStyle.HEADLINE).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
+  private val pcSystem = ui.text("", TextStyle.CAPTION, p.textSecondary).apply { maxLines = 1 }
   private val pcChip = ui.chip()
-  private val latencyValue = ui.tabular(ui.text("—", TextStyle.TITLE))
-  private val latencyQuality = ui.text("", TextStyle.CAPTION)
-  private val address = ui.text("—", TextStyle.MONO).apply { maxLines = 1 }
-  private val groups = GridLayout(ui.context).apply {
-    columnCount = 4
-    background = ui.rounded(p.surfaceSunken, 12f)
-    setPadding(ui.dp(12), ui.dp(10), ui.dp(12), ui.dp(10))
-  }
   private val disconnect = ui.button("Desconectar", ButtonStyle.OUTLINED, R.drawable.ic_unplug) { client.disconnect() }
   private val reconnect = ui.button("Reconectar", ButtonStyle.FILLED, R.drawable.ic_refresh_cw) { client.reconnect() }
   private val other = ui.button("Outro PC", ButtonStyle.TONAL, R.drawable.ic_scan_qr_code) { host.openPairingSheet() }
-  private val addressField = ui.field("Endereço IP")
-  private val portField = ui.field("Porta").apply { inputType = InputType.TYPE_CLASS_NUMBER }
-  private val chevron = ui.icon(R.drawable.ic_chevron_down, p.textSecondary, 20)
-  private val editForm = ui.column(12).apply {
-    addView(ui.text("Use se o IP do PC mudou e a busca automática não o encontrou.", TextStyle.CAPTION, p.textSecondary))
-    addView(ui.row(8).apply { addView(addressField, ui.weighted()); addView(portField, LinearLayout.LayoutParams(ui.dp(104), LinearLayout.LayoutParams.WRAP_CONTENT)) })
-    addView(ui.button("Salvar e reconectar", ButtonStyle.FILLED) {
-      val number = portField.text.toString().toIntOrNull()
-      if (addressField.text.isBlank() || number == null || number !in 1..65535) { host.notify("Informe um endereço e uma porta válidos.", Tone.DANGER); return@button }
-      client.updateAddress(addressField.text.toString().trim(), number) { error ->
-        if (error == null) { editing = false; render(state) }
-        host.result(error, "Endereço salvo. Reconectando…")
-      }
-    }, ui.matchWrap())
-  }
   private val pcCard = ui.card().apply {
     addView(ui.row(16).apply {
       addView(FrameLayout(context).apply {
@@ -174,50 +153,22 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
       }, LinearLayout.LayoutParams(ui.dp(52), ui.dp(52)))
       addView(ui.column(6).apply {
         addView(pcName)
-        addView(FrameLayout(context).apply { addView(pcChip, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT)) })
+        addView(ui.row(8).apply { addView(pcChip); addView(pcSystem, ui.weighted()) })
       }, ui.weighted())
     })
-    addView(ui.row(8).apply {
-      addView(stat("Latência", latencyValue, latencyQuality), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
-      addView(stat("Endereço salvo", address, null), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.6f))
-    })
-    addView(ui.column(8).apply {
-      addView(ui.row(8).apply {
-        addView(ui.icon(R.drawable.ic_shield_check, p.success, 18))
-        addView(ui.text("Identidade conferida a cada conexão", TextStyle.LABEL), ui.weighted())
-      })
-      addView(groups, ui.matchWrap())
-      addView(ui.text("Os blocos devem ser iguais aos de Diagnóstico no PC.", TextStyle.CAPTION, p.textTertiary))
-    })
     addView(ui.row(8).apply { addView(disconnect, ui.weighted()); addView(reconnect, ui.weighted()); addView(other, ui.weighted()) })
-    addView(ui.divider())
-    addView(ui.row(10).apply {
-      minimumHeight = ui.dp(48)
-      isClickable = true
-      background = ui.ripple(null, 12f)
-      contentDescription = "Corrigir endereço"
-      addView(ui.icon(R.drawable.ic_pencil, p.textSecondary, 18))
-      addView(ui.text("Corrigir endereço", TextStyle.LABEL), ui.weighted())
-      addView(chevron)
-      setOnClickListener {
-        editing = !editing
-        if (editing) client.savedAddress()?.let { (savedHost, savedPort) -> addressField.setText(savedHost); portField.setText(savedPort.toString()) }
-        render(state)
-      }
-    })
-    addView(editForm)
     addView(ui.button("Remover este PC", ButtonStyle.DANGER, R.drawable.ic_trash_2) { confirmForget() }, ui.matchWrap())
   }
 
   // Preferences and updates.
+  private val realtime = ui.switchRow("Sincronização em tempo real", "Copie no PC ou no celular e cole no outro. Desligada, enviar texto e arquivos continua manual.", R.drawable.ic_zap) { on ->
+    client.setPreferences(state.preferences.copy(realtime = on))
+  }
   private val theme = Segmented(ui, listOf(
     Triple(ThemeMode.SYSTEM, "Sistema", R.drawable.ic_monitor),
     Triple(ThemeMode.LIGHT, "Claro", R.drawable.ic_sun),
     Triple(ThemeMode.DARK, "Escuro", R.drawable.ic_moon),
   )) { mode -> host.setTheme(mode) }
-  private val haptics = ui.switchRow("Vibração", "Vibra quando o PC confirma um comando.", R.drawable.ic_hand) { on ->
-    client.setPreferences(state.preferences.copy(haptics = on))
-  }
   private val updateStatus = ui.text("", TextStyle.CAPTION, p.textSecondary)
   private val updateChip = ui.chip()
   private val check = ui.button("Verificar agora", ButtonStyle.OUTLINED, R.drawable.ic_refresh_cw) { host.checkUpdates(manual = true) }
@@ -228,9 +179,10 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
   private val versionLabel = ui.text("", TextStyle.CAPTION, p.textSecondary)
   private val prefsCard = ui.card(12).apply {
     addView(ui.cardHeader("Preferências"))
-    addView(ui.text("Tema", TextStyle.BODY_STRONG))
+    addView(realtime)
+    addView(ui.divider())
+    addView(ui.text("Tema", TextStyle.BODY_STRONG).apply { setPadding(0, ui.dp(4), 0, 0) })
     addView(theme, ui.matchWrap())
-    addView(haptics)
   }
   private val updatesCard = ui.card(12).apply {
     addView(ui.row(12).apply {
@@ -255,14 +207,6 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
     })
   }
 
-  private fun stat(label: String, value: View, extra: View?): View = ui.column(2).apply {
-    background = ui.rounded(p.surfaceSunken, 12f, p.border)
-    setPadding(ui.dp(12), ui.dp(12), ui.dp(12), ui.dp(12))
-    addView(ui.text(label, TextStyle.CAPTION, p.textSecondary))
-    addView(value)
-    if (extra != null) addView(extra)
-  }
-
   private fun confirmForget() {
     AlertDialog.Builder(host.activity, dialogTheme(p))
       .setTitle("Remover este PC?")
@@ -270,11 +214,6 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
       .setNegativeButton("Cancelar", null)
       .setPositiveButton("Remover") { _, _ -> client.forget() }
       .show()
-  }
-
-  fun setLatency(value: Long?) {
-    latency = value
-    render(state)
   }
 
   override fun render(state: UiState) {
@@ -298,35 +237,15 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
       pcName.text = state.pcName.ifBlank { "PC pareado" }
       val (tone, label) = statusTone(state.status)
       pcChip.set(tone, label)
-      val ms = if (connected) latency else null
-      latencyValue.text = if (ms == null) "—" else "$ms ms"
-      latencyQuality.text = when {
-        ms == null -> ""
-        ms < 40 -> "Excelente"
-        ms < 120 -> "Boa"
-        else -> "Lenta"
-      }
-      latencyQuality.setTextColor(if (ms != null && ms >= 120) p.warning else if (ms != null && ms < 40) p.success else p.textSecondary)
-      address.text = client.savedAddress()?.let { (h, port) -> "$h:$port" } ?: "—"
-      val fingerprint = client.savedFingerprint().orEmpty()
-      if (fingerprint != renderedFingerprint) {
-        renderedFingerprint = fingerprint
-        groups.removeAllViews()
-        val values = Fingerprint.groups(fingerprint).takeIf { it.size == 16 } ?: List(16) { "····" }
-        values.forEach { group ->
-          groups.addView(ui.text(group, TextStyle.MONO, if (fingerprint.isEmpty()) p.textTertiary else p.text).apply { setPadding(0, ui.dp(2), ui.dp(12), ui.dp(2)) })
-        }
-        groups.contentDescription = "SHA-256 ${values.joinToString(" ")}"
-      }
+      pcSystem.text = state.pcOs
+      pcSystem.visibility = if (state.pcOs.isEmpty()) View.GONE else View.VISIBLE
       disconnect.visibility = if (connected) View.VISIBLE else View.GONE
       reconnect.visibility = if (connected) View.GONE else View.VISIBLE
       reconnect.isEnabled = !waiting
-      editForm.visibility = if (editing) View.VISIBLE else View.GONE
-      chevron.setImageDrawable(ui.drawable(if (editing) R.drawable.ic_chevron_up else R.drawable.ic_chevron_down, p.textSecondary, 20))
     }
 
+    realtime.bind(state.preferences.realtime)
     theme.select(host.themeMode)
-    haptics.bind(state.preferences.haptics)
 
     val update = host.update
     versionLabel.text = "Versão ${update.installed ?: "desconhecida"}"

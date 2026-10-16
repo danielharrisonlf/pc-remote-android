@@ -48,6 +48,7 @@ internal class TouchPadView(
   init {
     isClickable = true
     isFocusable = true
+    isHapticFeedbackEnabled = false
     contentDescription = "Touchpad. Um dedo move o cursor e toque clica. Dois dedos rolam; toque com dois dedos abre o menu."
   }
 
@@ -213,6 +214,7 @@ internal class ScrollStripView(
 
   init {
     isClickable = true
+    isHapticFeedbackEnabled = false
     contentDescription = "Faixa de rolagem. Arraste para rolar a página no PC."
   }
 

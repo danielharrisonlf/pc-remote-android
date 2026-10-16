@@ -5,10 +5,32 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InputIntentTest {
-  private fun armed() = InputIntent().apply { confirmed() }
+  private fun armed() = InputIntent().apply { connected(); confirmed() }
 
-  @Test fun nothingRearmsBeforeTheUserActivates() {
-    assertFalse(InputIntent().shouldRearm(usable = true, armed = false, settling = false))
+  @Test fun nothingArmsBeforeAConnectionAndEveryConnectionWantsInput() {
+    val intent = InputIntent()
+    assertFalse(intent.shouldRearm(usable = true, armed = false, settling = false))
+    intent.connected()
+    assertTrue(intent.wanted)
+    assertTrue(intent.shouldRearm(usable = true, armed = false, settling = false))
+    // A lost connection ends it; the next one starts it again.
+    intent.clear()
+    assertFalse(intent.wanted)
+    intent.connected()
+    assertTrue(intent.wanted)
+  }
+
+  @Test fun desligarSticksAcrossConnectionsUntilAtivar() {
+    val intent = armed()
+    intent.userDisabled()
+    assertFalse(intent.wanted)
+    intent.clear(); intent.connected()
+    assertFalse(intent.wanted)
+    assertFalse(intent.shouldRearm(usable = true, armed = false, settling = false))
+    intent.userOn()
+    assertTrue(intent.wanted)
+    intent.clear(); intent.connected()
+    assertTrue(intent.wanted)
   }
 
   @Test fun pauseKeepsTheWishAndRearmsOnlyWhenUsableAgain() {
@@ -33,10 +55,15 @@ class InputIntentTest {
     assertTrue(intent.wanted)
   }
 
-  @Test fun pcBlockingOrSwitchingOffWhileArmedEndsTheWish() {
+  @Test fun aBlockOnThePcDropsInputButKeepsTheWishForWhenItIsLifted() {
     val blocked = armed()
-    assertTrue(blocked.pcState(allowed = false, enabled = false, armed = false))
-    assertFalse(blocked.wanted)
+    assertTrue(blocked.pcState(allowed = false, enabled = false, armed = true))
+    assertTrue(blocked.wanted)
+    assertFalse(blocked.pcState(allowed = true, enabled = false, armed = false))
+    assertTrue(blocked.shouldRearm(usable = true, armed = false, settling = false))
+  }
+
+  @Test fun switchingOffWhileArmedEndsTheWishAndOldPcsChangeNothing() {
     val switchedOff = armed()
     assertTrue(switchedOff.pcState(allowed = true, enabled = false, armed = true))
     assertFalse(switchedOff.wanted)
@@ -45,7 +72,7 @@ class InputIntentTest {
     assertTrue(legacy.wanted)
   }
 
-  @Test fun manualOffConnectionEndOrRefusedActivationEndsTheWish() {
+  @Test fun refusedActivationEndsTheWishWithoutRetrying() {
     val intent = armed()
     intent.clear()
     assertFalse(intent.wanted)
