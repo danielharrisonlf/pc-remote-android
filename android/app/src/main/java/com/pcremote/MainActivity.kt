@@ -2,6 +2,7 @@ package com.pcremote
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
@@ -11,6 +12,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -30,7 +32,6 @@ internal class MainActivity : Activity(), ScreenHost {
   private lateinit var navigation: TabNavigation
   private var state = UiState()
   private var updateState = UpdateState()
-  private var latency: Long? = null
   private var lastError = ""
   private var lastStatus = ""
   private var resumed = false
@@ -45,7 +46,6 @@ internal class MainActivity : Activity(), ScreenHost {
   private lateinit var topBar: LinearLayout
   private lateinit var title: TextView
   private lateinit var statusChip: StatusChip
-  private lateinit var latencyText: TextView
   private lateinit var banner: LinearLayout
   private lateinit var bannerTitle: TextView
   private lateinit var navBar: NavigationBar
@@ -66,8 +66,10 @@ internal class MainActivity : Activity(), ScreenHost {
       { task -> mainHandler.removeCallbacks(task); Unit })
   }
 
+  /** Pings only while the Conexão tab is on screen; it stops by itself elsewhere. */
   private val latencyTask = object : Runnable {
     override fun run() {
+      if (!resumed || navigation.tab != Tab.CONNECTION) return
       measureLatency()
       mainHandler.postDelayed(this, LATENCY_INTERVAL_MS)
     }
@@ -83,10 +85,12 @@ internal class MainActivity : Activity(), ScreenHost {
     lastStatus = state.status
     updateState = UpdateState(lookup = lastLookup, installed = Releases.installed(installedVersionName()), skipped = prefs.skippedUpdate)
     val restored = savedInstanceState?.getString(KEY_TAB)?.let { runCatching { Tab.valueOf(it) }.getOrNull() }
-    navigation = TabNavigation({ remote.disableInput(); volumeInteraction.finish() }, restored ?: homeTab())
-    if (savedInstanceState == null && intent?.action == Intent.ACTION_SEND) navigation.goTo(Tab.CLIPBOARD)
+    navigation = TabNavigation(restored ?: homeTab())
+    // A recreated Activity or a launch from Recents carries an old share: it was already handled.
+    val freshShare = savedInstanceState == null && intent?.let { isShare(it) && it.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0 } == true
+    if (freshShare) navigation.goTo(Tab.CLIPBOARD)
     buildUi()
-    remote.receiveShare(intent)
+    if (freshShare) remote.receiveShare(intent)
     unsubscribe = remote.observe { next ->
       runOnUiThread {
         val changed = state.forDisplay() != next.forDisplay()
@@ -113,8 +117,7 @@ internal class MainActivity : Activity(), ScreenHost {
     super.onResume()
     resumed = true
     remote.foreground(this)
-    mainHandler.removeCallbacks(latencyTask)
-    mainHandler.post(latencyTask)
+    restartLatency()
     val stale = System.currentTimeMillis() - prefs.lastUpdateCheck > UPDATE_INTERVAL_MS
     if (lastLookup == null || stale) checkUpdates(manual = false)
   }
@@ -147,9 +150,57 @@ internal class MainActivity : Activity(), ScreenHost {
     super.onNewIntent(intent)
     setIntent(intent)
     remote.receiveShare(intent)
-    navigation.newIntent(shared = intent.action == Intent.ACTION_SEND)
+    navigation.newIntent(shared = isShare(intent))
     volumeInteraction.finish()
     render()
+  }
+
+  private fun isShare(intent: Intent) = intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE
+
+  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    if (requestCode != PICK_FILES) { super.onActivityResult(requestCode, resultCode, data); return }
+    if (resultCode != RESULT_OK || data == null) return
+    val clip = data.clipData
+    val uris = if (clip != null) (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri } else listOfNotNull(data.data)
+    remote.sendFiles(uris)
+  }
+
+  /**
+   * Hardware volume keys move the PC volume on the Touchpad and Mídia tabs while
+   * connected; elsewhere, disconnected or with a panel open, the phone keeps them.
+   */
+  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    val code = event.keyCode
+    if (code != KeyEvent.KEYCODE_VOLUME_UP && code != KeyEvent.KEYCODE_VOLUME_DOWN && code != KeyEvent.KEYCODE_VOLUME_MUTE) return super.dispatchKeyEvent(event)
+    if (!VolumeKeys.controlsPc(navigation.tab, resumed, state.status == "Conectado", state.snapshot?.audio?.available == true, panels.isOpen)) return super.dispatchKeyEvent(event)
+    if (event.action == KeyEvent.ACTION_DOWN) volumeKey(code, event.repeatCount)
+    return true // Both down and up: the phone's own volume and panel must not react.
+  }
+
+  private fun volumeKey(code: Int, repeat: Int) {
+    if (repeat == 0) haptic()
+    val touchpad = navigation.tab == Tab.TOUCHPAD
+    if (code == KeyEvent.KEYCODE_VOLUME_MUTE) {
+      if (repeat > 0) return
+      val muted = state.snapshot?.audio?.muted != true
+      remote.execute(RemoteAction.VolumeMute(muted)) { error ->
+        runOnUiThread {
+          if (isDestroyed) return@runOnUiThread
+          if (error != null) snackbar.show(error, Tone.DANGER)
+          else if (touchpad) snackbar.show(if (muted) "PC sem som." else "Som do PC ativado.", Tone.ACCENT)
+        }
+      }
+      return
+    }
+    val current = state.draggingVolume ?: state.snapshot?.audio?.percent ?: return
+    val next = VolumeKeys.step(current, code == KeyEvent.KEYCODE_VOLUME_UP)
+    if (next != current) volumeInteraction.change(next)
+    if (touchpad) snackbar.show("Volume do PC: $next%", Tone.ACCENT)
+  }
+
+  private fun restartLatency() {
+    mainHandler.removeCallbacks(latencyTask)
+    if (resumed && navigation.tab == Tab.CONNECTION) mainHandler.post(latencyTask)
   }
 
   @Deprecated("Handled for devices before Android 13")
@@ -166,9 +217,11 @@ internal class MainActivity : Activity(), ScreenHost {
   }
 
   private fun selectTab(tab: Tab) {
-    if (tab != navigation.tab) hideKeyboard()
+    val changed = tab != navigation.tab
+    if (changed) hideKeyboard()
     navigation.goTo(tab)
     volumeInteraction.finish()
+    if (changed) restartLatency()
     render()
   }
 
@@ -185,13 +238,12 @@ internal class MainActivity : Activity(), ScreenHost {
     window.navigationBarColor = p.surface
 
     statusChip = kit.chip()
-    latencyText = kit.tabular(kit.text("", TextStyle.CAPTION, p.textTertiary))
     title = kit.text("PC Remote", TextStyle.TITLE).apply { maxLines = 1; accessibilityHeading() }
     topBar = kit.row(8).apply {
       setPadding(kit.dp(20), kit.dp(12), kit.dp(8), kit.dp(12))
       addView(kit.column(6).apply {
         addView(title)
-        addView(kit.row(8).apply { addView(statusChip); addView(latencyText) })
+        addView(kit.row(8).apply { addView(statusChip) })
       }, kit.weighted())
       addView(kit.iconButton(if (p.dark) R.drawable.ic_sun else R.drawable.ic_moon, if (p.dark) "Usar tema claro" else "Usar tema escuro") {
         setTheme(if (p.dark) ThemeMode.LIGHT else ThemeMode.DARK)
@@ -288,8 +340,6 @@ internal class MainActivity : Activity(), ScreenHost {
     val (tone, label) = statusTone(state.status)
     statusChip.set(tone, label)
     title.text = state.pcName.ifBlank { "PC Remote" }
-    latencyText.text = if (connected && latency != null) "$latency ms" else ""
-    latencyText.visibility = if (latencyText.text.isEmpty()) View.GONE else View.VISIBLE
 
     val notify = updateState.notify
     banner.visibility = if (notify) View.VISIBLE else View.GONE
@@ -318,17 +368,9 @@ internal class MainActivity : Activity(), ScreenHost {
   }
 
   private fun measureLatency() {
-    if (!resumed || state.status != "Conectado") {
-      if (latency != null) { latency = null; connection.setLatency(null); render() }
-      return
-    }
+    if (state.status != "Conectado") { connection.setLatency(null); return }
     remote.ping { ms ->
-      runOnUiThread {
-        if (isDestroyed) return@runOnUiThread
-        latency = ms
-        connection.setLatency(ms)
-        render()
-      }
+      runOnUiThread { if (!isDestroyed) connection.setLatency(ms) }
     }
   }
 
@@ -356,6 +398,20 @@ internal class MainActivity : Activity(), ScreenHost {
   }
 
   override fun navigate(tab: Tab) = selectTab(tab)
+
+  override fun pickFiles() {
+    val picker = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+      addCategory(Intent.CATEGORY_OPENABLE)
+      type = "*/*"
+      putExtra(Intent.EXTRA_MIME_TYPES, FileRules.MIME_TYPES.toTypedArray())
+      putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+    }
+    try {
+      startActivityForResult(picker, PICK_FILES)
+    } catch (_: ActivityNotFoundException) {
+      snackbar.show("Nenhum seletor de arquivos disponível neste celular.", Tone.DANGER)
+    }
+  }
 
   override fun scanQr() {
     qrScanner.start(this) { invite, problem ->
@@ -426,6 +482,7 @@ internal class MainActivity : Activity(), ScreenHost {
   private companion object {
     const val KEY_TAB = "tab"
     const val KEY_FADE_IN = "fadeIn"
+    const val PICK_FILES = 41
     const val LATENCY_INTERVAL_MS = 5000L
     const val UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000L
     const val SNACKBAR_OFFSET_DP = 92

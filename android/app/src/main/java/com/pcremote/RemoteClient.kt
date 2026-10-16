@@ -69,7 +69,7 @@ class RemoteClient(context: Context) : RemoteController {
   private var attempt = 0
   private var reconnectTask: Runnable? = null
   private val pending = LinkedHashMap<String, Pending>()
-  private data class Pending(val completion:(String?)->Unit,val timeout:Runnable,val generation:Int)
+  private data class Pending(val completion:(String?,String?)->Unit,val timeout:Runnable,val generation:Int)
   private val clipboardSession = ClipboardSession()
   private val clipboardTracker = ClipboardTracker()
   private var volumeAt = 0L
@@ -84,8 +84,10 @@ class RemoteClient(context: Context) : RemoteController {
   private var disarmAck=false
   private var disarmStateSeen=false
   private var disarmTimer:Runnable?=null
-  private data class Activation(val generation:Int,val revision:Long,val completion:(String?)->Unit,var acked:Boolean=false,var fresh:Boolean=false,var timeout:Runnable?=null)
+  private data class Activation(val generation:Int,val revision:Long,val automatic:Boolean,val completion:(String?)->Unit,var acked:Boolean=false,var fresh:Boolean=false,var timeout:Runnable?=null)
   private var activation:Activation?=null
+  private val inputIntent = InputIntent()
+  private val files = FileTransfer(app.contentResolver,main,{ fileLink() },{ action,done -> send(action,done) },{ v -> if(view.files!=v) patch { it.copy(files=v) } },{ fail(it) })
   private val motion = InputMotion(main,{ canInput() },{ dx,dy,done -> request(RemoteAction.PointerMove(dx,dy),done) },{ fail(it) })
   private val scrollMotion = ScrollMotion({ canInput() },{ steps,done -> request(RemoteAction.PointerScroll(steps),done) },{ fail(it) })
   private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener { main.post { localClipboardChanged() } }
@@ -114,7 +116,7 @@ class RemoteClient(context: Context) : RemoteController {
     } catch (_: RuntimeException) { /* Clipboard preview remains available in the app. */ }
   }
   private fun run(block:()->Unit) { if(Looper.myLooper()==Looper.getMainLooper()) block() else main.post(block) }
-  private fun patch(f:(UiState)->UiState) { view=f(view); listeners.toList().forEach { it(view) } }
+  private fun patch(f:(UiState)->UiState) { view=f(view).let { it.copy(inputResuming=inputIntent.wanted && !it.inputArmed) }; listeners.toList().forEach { it(view) } }
   private fun fail(text:String) = patch { it.copy(error=text) }
   override fun observe(listener:(UiState)->Unit):()->Unit { run { listeners.add(listener); listener(view) }; return { run { listeners.remove(listener) } } }
   override fun foreground(activity:Activity) = run {
@@ -122,17 +124,18 @@ class RemoteClient(context: Context) : RemoteController {
     if(hasFocus()) clipboardTracker.baseline(readLocalClipboardOrNull()) else clipboardTracker.suspend()
     clipboardSession.takePending()?.let { pending -> patch { it.copy(receivedText=pending.text) } }
     autoReconnect(); if(!requestedDisconnect) startDiscovery()
+    resumeInput()
   }
   override fun background() = run {
     foreground=false; activity.clear(); clipboardTracker.suspend()
-    disableInput(); stopDiscovery()
+    pauseInput(); stopDiscovery()
   }
   private fun hasFocus() = foreground && activity.get()?.hasWindowFocus()==true
   override fun focusChanged(hasFocus:Boolean) = run {
     if(!hasFocus) {
       clipboardTracker.suspend()
-      disableInput()
-    } else if(foreground && hasFocus()) clipboardTracker.baseline(readLocalClipboardOrNull())
+      pauseInput()
+    } else if(foreground && hasFocus()) { clipboardTracker.baseline(readLocalClipboardOrNull()); resumeInput() }
   }
   override fun pair(host:String,port:Int,fingerprint:String,code:String) = run {
     val h=host.trim(); val fp=fingerprint.trim().replace(":","").lowercase()
@@ -152,7 +155,7 @@ class RemoteClient(context: Context) : RemoteController {
       restoreFailedPair()
     }
     previousPairEndpoint=endpoint?.takeIf { it.token.isNotBlank() } ?: store.restore()
-    close(false)
+    close(false); files.forget()
     requestedDisconnect=false; endpoint=PairedComputer(host,port,fingerprint,UUID.randomUUID().toString(),deviceName())
     pairingHandshake=true
     pairCode=code; patch { it.copy(status="Pareando",error="",snapshot=null,receivedText="",pairingFingerprint=fingerprint) }; open(false)
@@ -181,7 +184,7 @@ class RemoteClient(context: Context) : RemoteController {
   }
   override fun forget() = run {
     try { store.clear() } catch (_:Exception) { fail("Não foi possível remover a credencial protegida. Tente novamente."); return@run }
-    close(true); previousPairEndpoint=null; pairingHandshake=false; endpoint=null
+    close(true); files.forget(); previousPairEndpoint=null; pairingHandshake=false; endpoint=null
     patch { it.copy(status="Desconectado",pcName="",snapshot=null,receivedText="") }
   }
   override fun savedAddress():Pair<String,Int>? = (endpoint ?: store.restore())?.let { it.host to it.port }
@@ -201,7 +204,7 @@ class RemoteClient(context: Context) : RemoteController {
   private fun close(user:Boolean) {
     requestedDisconnect=user; reconnectTask?.let(main::removeCallbacks); reconnectTask=null
     generation++; retireClipboard(); authenticated=false; clearDisarm(); pairId=null; helloId=null; pairCode=null
-    dropInput(); rejectPending(); volumeTask?.let(main::removeCallbacks); volumeTask=null; finalVolumeTimeout?.let(main::removeCallbacks); finalVolumeTimeout=null; finalVolume=null
+    inputIntent.clear(); dropInput(); rejectPending(); files.connectionEnded(); volumeTask?.let(main::removeCallbacks); volumeTask=null; finalVolumeTimeout?.let(main::removeCallbacks); finalVolumeTimeout=null; finalVolume=null
     socket?.close(1000,"Desconectado"); socket=null; client?.dispatcher?.executorService?.shutdown(); client=null
   }
   private fun restoreFailedPair() {
@@ -211,8 +214,8 @@ class RemoteClient(context: Context) : RemoteController {
   private fun open(reconnecting:Boolean) {
     val e=endpoint ?: return
     reconnectTask?.let(main::removeCallbacks); reconnectTask=null
-    generation++; val own=generation; retireClipboard(); authenticated=false; clearDisarm(); dropInput(); rejectPending()
-    patch { it.copy(status=if(reconnecting) "Reconectando" else "Conectando",snapshot=null,inputSupported=false) }
+    generation++; val own=generation; retireClipboard(); authenticated=false; clearDisarm(); inputIntent.clear(); dropInput(); rejectPending(); files.connectionEnded()
+    patch { it.copy(status=if(reconnecting) "Reconectando" else "Conectando",snapshot=null,inputSupported=false,filesSupported=false) }
     // Only a code pairing starts without a pinned identity; every other connection pins.
     val firstUse=e.fingerprint.isEmpty() && pairCode!=null
     if(e.fingerprint.isEmpty() && !firstUse) { fail("Pareie este PC de novo."); lost(own); return }
@@ -225,7 +228,9 @@ class RemoteClient(context: Context) : RemoteController {
           if(chain.size!=1) throw CertificateException("chain")
           chain[0].checkValidity()
           val digest=MessageDigest.getInstance("SHA-256").digest(chain[0].encoded).joinToString("") { "%02x".format(it) }
-          if(firstUse) observed.set(digest) else if(digest!=e.fingerprint) throw CertificateException("fingerprint")
+          // First use pins whatever the first handshake saw; later sockets of this client, such as /v1/files, must match it.
+          if(firstUse) { if(!observed.compareAndSet(null,digest) && observed.get()!=digest) throw CertificateException("fingerprint") }
+          else if(digest!=e.fingerprint) throw CertificateException("fingerprint")
         }
       }
       val ssl=SSLContext.getInstance("TLS").apply { init(null,arrayOf<TrustManager>(trust),SecureRandom()) }
@@ -235,7 +240,8 @@ class RemoteClient(context: Context) : RemoteController {
           return InetAddress.getAllByName(e.host).filterIsInstance<Inet4Address>().ifEmpty { throw UnknownHostException(e.host) }
         }
       }).connectTimeout(8,TimeUnit.SECONDS).pingInterval(20,TimeUnit.SECONDS).build()
-      socket=client!!.newWebSocket(Request.Builder().url("wss://pc-remote.local:${e.port}/v1/ws").header("X-PC-Remote-Features","input.v1").build(),object:WebSocketListener() {
+      // Separate header lines: PCs up to 0.3 read only the first value and keep input.v1 working.
+      socket=client!!.newWebSocket(Request.Builder().url("wss://pc-remote.local:${e.port}/v1/ws").addHeader("X-PC-Remote-Features","input.v1").addHeader("X-PC-Remote-Features","files.v1").build(),object:WebSocketListener() {
         override fun onOpen(ws:WebSocket,response:Response) { main.post {
           if(own!=generation) { ws.close(1000,null); return@post }
           if(firstUse) {
@@ -275,11 +281,12 @@ class RemoteClient(context: Context) : RemoteController {
           patch { it.copy(status="Desconectado",error="Não foi possível proteger e salvar o pareamento. Verifique o armazenamento do celular e tente novamente.",snapshot=null) }
           return
         }
-        helloId=null; pairingHandshake=false; previousPairEndpoint=null; authenticated=true; attempt=0; clipboardSession.retire(); dropInput()
+        helloId=null; pairingHandshake=false; previousPairEndpoint=null; authenticated=true; attempt=0; clipboardSession.retire(); inputIntent.clear(); dropInput()
         if(hasFocus()) clipboardTracker.baseline(readLocalClipboardOrNull()) else clipboardTracker.suspend()
-        patch { it.copy(status="Conectado",error="",pcName=msg.pcName,snapshot=null,receivedText="",inputSupported=msg.input,draggingVolume=null) }
-        request(RemoteAction.StateGet) {}; sendSync()
+        patch { it.copy(status="Conectado",error="",pcName=msg.pcName,snapshot=null,receivedText="",inputSupported=msg.input,filesSupported=msg.files,draggingVolume=null) }
+        request(RemoteAction.StateGet) {}; sendSync(); files.connected()
       }
+      is Incoming.FileTicket -> if(authenticated && view.filesSupported) files.ticket(msg) else ws.close(1002,null)
       is Incoming.Error -> if(msg.id==pairId || msg.id==helloId) {
         val failedPairing=pairingHandshake
         if(msg.code=="unauthorized" && !failedPairing) {
@@ -290,8 +297,8 @@ class RemoteClient(context: Context) : RemoteController {
         close(true)
         if(failedPairing) restoreFailedPair()
         patch { it.copy(status="Desconectado",error=message) }
-      } else if(authenticated) complete(msg.id,msg.message)
-      is Incoming.Ack -> if(authenticated) complete(msg.id,null) else ws.close(1002,null)
+      } else if(authenticated) complete(msg.id,msg.message,msg.code)
+      is Incoming.Ack -> if(authenticated) complete(msg.id,null,null) else ws.close(1002,null)
       is Incoming.State -> if(authenticated) onState(msg.snapshot) else ws.close(1002,null)
       is Incoming.Clipboard -> if(authenticated) onClipboard(msg,foreground) else ws.close(1002,null)
     }
@@ -304,30 +311,34 @@ class RemoteClient(context: Context) : RemoteController {
     reconnectTask?.let(main::removeCallbacks); reconnectTask=null
     if(pairingHandshake) restoreFailedPair()
     pairCode=null; pairId=null
-    helloId=null; authenticated=false; clearDisarm(); socket?.cancel(); socket=null; client?.dispatcher?.executorService?.shutdown(); client=null; dropInput(); rejectPending(); volumeTask?.let(main::removeCallbacks); volumeTask=null; finalVolumeTimeout?.let(main::removeCallbacks); finalVolumeTimeout=null; finalVolume=null
-    patch { it.copy(status="Desconectado",snapshot=null,inputSupported=false,draggingVolume=null) }
+    helloId=null; authenticated=false; clearDisarm(); socket?.cancel(); socket=null; client?.dispatcher?.executorService?.shutdown(); client=null; inputIntent.clear(); dropInput(); rejectPending(); files.connectionEnded(); volumeTask?.let(main::removeCallbacks); volumeTask=null; finalVolumeTimeout?.let(main::removeCallbacks); finalVolumeTimeout=null; finalVolume=null
+    patch { it.copy(status="Desconectado",snapshot=null,inputSupported=false,filesSupported=false,draggingVolume=null) }
     if(requestedDisconnect || !foreground || endpoint?.token.isNullOrBlank()) return
     val delay=intArrayOf(1,2,4,8,16,30)[attempt.coerceAtMost(5)]*1000L+SecureRandom().nextInt(500)
     val retired=generation
     attempt++; val task=Runnable { if(retired==generation && foreground && !requestedDisconnect) { reconnectTask=null; open(true) } }; reconnectTask=task; main.postDelayed(task,delay)
   }
-  private fun complete(id:String,error:String?) { val p=pending.remove(id) ?: return; main.removeCallbacks(p.timeout); if(p.generation==generation) p.completion(error) }
-  private fun rejectPending() { val all=pending.values.toList(); pending.clear(); all.forEach { main.removeCallbacks(it.timeout); it.completion("Conexão interrompida.") } }
-  private fun request(action:RemoteAction,completion:(String?)->Unit) {
+  private fun complete(id:String,error:String?,code:String?) { val p=pending.remove(id) ?: return; main.removeCallbacks(p.timeout); if(p.generation==generation) p.completion(error,code) }
+  private fun rejectPending() { val all=pending.values.toList(); pending.clear(); all.forEach { main.removeCallbacks(it.timeout); it.completion("Conexão interrompida.",null) } }
+  private fun request(action:RemoteAction,completion:(String?)->Unit) { send(action) { error,_ -> completion(error) } }
+  /** Completes with the PC message and error code; returns the request id once the frame is queued. */
+  private fun send(action:RemoteAction,completion:(String?,String?)->Unit):String? {
     val body=Protocol.action(action)
-    if(body==null) { completion("Comando inválido."); return }
-    if(!authenticated || socket==null) { completion("Computador desconectado."); return }
+    if(body==null) { completion("Comando inválido.",null); return null }
+    if(!authenticated || socket==null) { completion("Computador desconectado.",null); return null }
     val input=action is RemoteAction.InputEnable || action is RemoteAction.PointerMove || action is RemoteAction.PointerClick || action is RemoteAction.PointerScroll || action is RemoteAction.KeyboardText || action is RemoteAction.KeyboardKey
     val disable=action is RemoteAction.InputEnable && !action.enabled
-    if(input && (!view.inputSupported || (!disable && !foreground))) { completion("Controle de entrada indisponível."); return }
-    if(action is RemoteAction.InputEnable && action.enabled && (!hasFocus() || view.snapshot?.input?.allowed!=true)) { completion("Controle de entrada não autorizado pelo PC."); return }
-    if(input && !disable && action !is RemoteAction.InputEnable && !canInput()) { completion("Ative o controle de entrada no PC e no celular."); return }
-    if(action is RemoteAction.ClipboardSet && action.automatic && (!hasFocus() || !view.preferences.upload || view.preferences.paused)) { completion("Envio automático está desativado."); return }
+    if(input && (!view.inputSupported || (!disable && !foreground))) { completion("Controle de entrada indisponível.",null); return null }
+    if(action is RemoteAction.InputEnable && action.enabled && (!hasFocus() || view.snapshot?.input?.allowed!=true)) { completion("Controle de entrada não autorizado pelo PC.",null); return null }
+    if(input && !disable && action !is RemoteAction.InputEnable && !canInput()) { completion("Ative o controle de entrada no PC e no celular.",null); return null }
+    if(action is RemoteAction.ClipboardSet && action.automatic && (!hasFocus() || !view.preferences.upload || view.preferences.paused)) { completion("Envio automático está desativado.",null); return null }
+    if((action is RemoteAction.FileOffer || action is RemoteAction.FileCancel) && !view.filesSupported) { completion("Atualize o PC Remote no Windows para enviar arquivos.",null); return null }
     val id=UUID.randomUUID().toString(); val frame=JSONObject().put("v",1).put("type","request").put("id",id).put("action",body).toString()
-    if(frame.toByteArray(Charsets.UTF_8).size>Protocol.MAX_FRAME) { completion("Comando muito grande."); return }
-    val own=generation; val timeout=Runnable { pending.remove(id)?.completion?.invoke("O PC não confirmou a ação a tempo.") }
+    if(frame.toByteArray(Charsets.UTF_8).size>Protocol.MAX_FRAME) { completion("Comando muito grande.",null); return null }
+    val own=generation; val timeout=Runnable { pending.remove(id)?.completion?.invoke("O PC não confirmou a ação a tempo.",null) }
     pending[id]=Pending(completion,timeout,own); main.postDelayed(timeout,8000)
-    if(socket?.send(frame)!=true) complete(id,"Conexão interrompida.")
+    if(socket?.send(frame)!=true) { complete(id,"Conexão interrompida.",null); return null }
+    return id
   }
   override fun execute(action:RemoteAction,completion:(String?)->Unit) = run {
     if(action is RemoteAction.MediaControl) {
@@ -346,10 +357,12 @@ class RemoteClient(context: Context) : RemoteController {
     if(old!=null && s.revision<old.revision) return
     if(old!=null && s.revision==old.revision && finalVolume?.acked!=true) return
     clipboardSession.advanceRevision(s.clipboardRevision)
-    if(s.input?.allowed==false || (s.input?.enabled==false && view.inputArmed)) dropInput()
+    // Blocked on the PC, or switched off there while armed: the PC took control back.
+    if(inputIntent.pcState(s.input?.allowed,s.input?.enabled,view.inputArmed)) dropInput()
+    var settled=false
     if(inputDisarming && s.input?.enabled==false) {
       disarmStateSeen=true
-      if(disarmAck) clearDisarm()
+      if(disarmAck) { clearDisarm(); settled=true }
     }
     val activating=activation
     if(activating!=null && s.revision>activating.revision && s.input?.allowed==true && s.input.enabled) {
@@ -361,6 +374,8 @@ class RemoteClient(context: Context) : RemoteController {
     if(done) { finalVolume=null; finalVolumeTimeout?.let(main::removeCallbacks); finalVolumeTimeout=null }
     patch { it.copy(snapshot=s,selectedSessionId=selected,draggingVolume=if(done) null else it.draggingVolume) }
     if(activating?.fresh==true && activating.acked) finishActivation(activating,null)
+    if(settled) resumeInput()
+    files.pump()
   }
   private fun onClipboard(e:Incoming.Clipboard,allowAuto:Boolean) {
     if(!clipboardSession.accept(e,view.snapshot?.clipboardRevision ?: 0)) return
@@ -419,9 +434,26 @@ class RemoteClient(context: Context) : RemoteController {
     request(RemoteAction.ClipboardSet(UUID.randomUUID().toString(),text,automatic,clipboardSession.revision),completion)
   }
   override fun receiveShare(intent:Intent) = run {
+    val streams=sharedStreams(intent)
+    if(streams.isNotEmpty()) { files.add(streams); return@run }
     if(intent.action!=Intent.ACTION_SEND || intent.type!="text/plain") return@run
     val text=intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: return@run
     if(!Protocol.validText(text)) fail("Texto compartilhado inválido ou maior que 64 KiB.") else patch { it.copy(sharedText=text) }
+  }
+  @Suppress("DEPRECATION") // The typed overloads need API 33; these work on every supported version.
+  private fun sharedStreams(intent:Intent):List<android.net.Uri> = try { when(intent.action) {
+    Intent.ACTION_SEND -> listOfNotNull(intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM))
+    Intent.ACTION_SEND_MULTIPLE -> intent.getParcelableArrayListExtra<android.net.Uri>(Intent.EXTRA_STREAM).orEmpty().filterNotNull()
+    else -> emptyList()
+  } } catch (_:RuntimeException) { emptyList() }
+  override fun sendFiles(uris:List<android.net.Uri>) = run { files.add(uris) }
+  override fun cancelFile() = run { files.cancel() }
+  override fun clearFileQueue() = run { files.clearQueue() }
+  override fun resumeFiles() = run { files.resume() }
+  /** The control connection's pinned client, while it is authenticated and the PC accepts files. */
+  private fun fileLink():FileLink? {
+    val c=client; val e=endpoint; val f=view.snapshot?.files
+    return if(authenticated && socket!=null && c!=null && e!=null && view.filesSupported && f?.allowed==true) FileLink(c,e.port,generation,minOf(f.maxBytes,FileRules.MAX_BYTES)) else null
   }
   private fun clipboardFailure(message:String,completion:(String?)->Unit) {
     fail(message)
@@ -531,20 +563,27 @@ class RemoteClient(context: Context) : RemoteController {
   private fun finishActivation(a:Activation,error:String?) {
     if(activation!==a) return
     a.timeout?.let(main::removeCallbacks); activation=null
-    if(error==null && a.generation==inputGeneration && hasFocus() && view.snapshot?.input?.allowed==true && view.snapshot?.input?.enabled==true) patch { it.copy(inputArmed=true,inputActivating=false) }
-    else { patch { it.copy(inputActivating=false) }; startInputDisarm() }
+    if(error==null && a.generation==inputGeneration && hasFocus() && view.snapshot?.input?.allowed==true && view.snapshot?.input?.enabled==true) { inputIntent.confirmed(); patch { it.copy(inputArmed=true,inputActivating=false) } }
+    else { inputIntent.clear(); patch { it.copy(inputActivating=false) }; startInputDisarm() }
     a.completion(if(error==null && view.inputArmed) null else error ?: "PC ainda não confirmou o controle de entrada.")
   }
+  /** Stops local input at once; the caller decides whether the user's wish survives. */
   private fun dropInput() {
-    activation?.let { a -> a.timeout?.let(main::removeCallbacks); activation=null; a.completion("Controle interrompido."); startInputDisarm() }
+    // An interrupted re-arm stays silent: the pause that interrupted it re-arms again later.
+    activation?.let { a -> a.timeout?.let(main::removeCallbacks); activation=null; if(!a.automatic) a.completion("Controle interrompido."); startInputDisarm() }
     inputGeneration++; discretePending=false; motion.cancel(); scrollMotion.cancel(); patch { it.copy(inputArmed=false,inputActivating=false) }
   }
   override fun enableInput(completion:(String?)->Unit) = run {
+    // A pause already queued the re-arm behind its disarm.
+    if(inputIntent.wanted && inputDisarming) { completion(null); return@run }
+    activate(false,completion)
+  }
+  private fun activate(automatic:Boolean,completion:(String?)->Unit) {
     if(inputNeedsDisarm && !inputDisarming) startInputDisarm()
-    if(inputDisarming) { completion("Aguarde o PC desativar o controle de entrada."); return@run }
-    if(!authenticated || !hasFocus() || !view.inputSupported || view.snapshot?.input?.allowed!=true) { completion("Controle de entrada indisponível neste PC."); return@run }
-    if(view.inputActivating) { completion(null); return@run }
-    val own=inputGeneration; val a=Activation(own,view.snapshot?.revision ?: -1,completion); activation=a
+    if(inputDisarming) { completion("Aguarde o PC desativar o controle de entrada."); return }
+    if(!authenticated || !hasFocus() || !view.inputSupported || view.snapshot?.input?.allowed!=true) { completion("Controle de entrada indisponível neste PC."); return }
+    if(view.inputActivating) { completion(null); return }
+    val own=inputGeneration; val a=Activation(own,view.snapshot?.revision ?: -1,automatic,completion); activation=a
     val timer=Runnable { finishActivation(a,"PC ainda não confirmou o controle de entrada.") }; a.timeout=timer; main.postDelayed(timer,8000)
     patch { it.copy(inputActivating=true) }
     request(RemoteAction.InputEnable(true)) { e ->
@@ -556,21 +595,36 @@ class RemoteClient(context: Context) : RemoteController {
     }
   }
   override fun disableInput() = run {
+    inputIntent.clear()
     dropInput()
     startInputDisarm()
+  }
+  /** Background or focus loss: a phone that is not in use must not leave the PC armed, but the wish survives. */
+  private fun pauseInput() {
+    dropInput()
+    startInputDisarm()
+  }
+  /** Arms again a session paused by background or focus loss, once nothing is in flight. */
+  private fun resumeInput() {
+    val usable=authenticated && hasFocus() && view.inputSupported && view.snapshot?.input?.allowed==true
+    if(!inputIntent.shouldRearm(usable,view.inputArmed,view.inputActivating || inputDisarming)) return
+    // A disarm that failed earlier must settle first; its completion calls back here.
+    if(inputNeedsDisarm) { startInputDisarm(); return }
+    activate(true) { error -> if(error!=null) fail(error) }
   }
   private fun startInputDisarm() {
     if(inputDisarming || !authenticated || !view.inputSupported) return
     inputNeedsDisarm=true; inputDisarming=true; disarmAck=false; disarmStateSeen=view.snapshot?.input?.enabled==false
     val own=generation
-    val timer=Runnable { if(own==generation && inputDisarming) { inputDisarming=false; disarmTimer=null; fail("O PC não confirmou a desativação do controle de entrada.") } }
+    // An unconfirmed disarm also drops the wish: arming again needs a fresh tap.
+    val timer=Runnable { if(own==generation && inputDisarming) { inputDisarming=false; disarmTimer=null; inputIntent.clear(); fail("O PC não confirmou a desativação do controle de entrada.") } }
     disarmTimer=timer; main.postDelayed(timer,8000)
     request(RemoteAction.InputEnable(false)) { error ->
       if(own!=generation || !inputDisarming) return@request
-      if(error!=null) { inputDisarming=false; disarmTimer?.let(main::removeCallbacks); disarmTimer=null; fail("Não foi possível desativar o controle de entrada no PC."); return@request }
+      if(error!=null) { inputDisarming=false; disarmTimer?.let(main::removeCallbacks); disarmTimer=null; inputIntent.clear(); fail("Não foi possível desativar o controle de entrada no PC."); return@request }
       disarmAck=true
-      if(disarmStateSeen) clearDisarm()
-      else request(RemoteAction.StateGet) { stateError -> if(own==generation && stateError!=null) { inputDisarming=false; fail(stateError) } }
+      if(disarmStateSeen) { clearDisarm(); resumeInput() }
+      else request(RemoteAction.StateGet) { stateError -> if(own==generation && stateError!=null) { inputDisarming=false; inputIntent.clear(); fail(stateError) } }
     }
   }
   private fun clearDisarm() {

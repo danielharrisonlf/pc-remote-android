@@ -27,19 +27,20 @@ internal enum class Tab(val label: String, val icon: Int) {
   CONNECTION("Conexão", R.drawable.ic_monitor_smartphone),
 }
 
-/** Input belongs to the touchpad tab: leaving it, or a new Intent, disarms it. */
-internal class TabNavigation(private val disarm: () -> Unit, initial: Tab) {
+/**
+ * Current tab. Switching tabs or receiving an Intent never touches remote input:
+ * the touchpad stays on until "Desligar" or the end of the connection (see InputIntent).
+ */
+internal class TabNavigation(initial: Tab) {
   var tab = initial
     private set
 
   fun goTo(destination: Tab) {
-    if (tab == Tab.TOUCHPAD && destination != Tab.TOUCHPAD) disarm()
     tab = destination
   }
 
-  /** Shared text opens the transfer tab; any new Intent disarms remote input. */
+  /** Shared text or files open the transfer tab; other Intents keep the current one. */
   fun newIntent(shared: Boolean) {
-    disarm()
     if (shared) tab = Tab.CLIPBOARD
   }
 }
@@ -172,7 +173,8 @@ internal class SheetFrame(private val ui: Ui, title: String, subtitle: String?, 
 /**
  * Bottom sheet on a Dialog: system Back and the scrim close it, and the window
  * fits system bars and the keyboard so fields stay visible. The Dialog takes
- * window focus, which disarms remote input; use [PanelSheet] while controlling the PC.
+ * window focus, which pauses remote input until it closes; use [PanelSheet] while
+ * controlling the PC.
  */
 internal class Sheet(activity: Activity, ui: Ui, title: String, subtitle: String? = null) {
   val dialog = Dialog(activity)
@@ -208,7 +210,7 @@ internal class Sheet(activity: Activity, ui: Ui, title: String, subtitle: String
 }
 
 /**
- * Layer for bottom panels inside the main window. RemoteClient disarms input
+ * Layer for bottom panels inside the main window. RemoteClient pauses input
  * when the window loses focus, and a Dialog takes focus, so panels used while
  * controlling the PC open here instead.
  */

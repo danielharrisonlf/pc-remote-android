@@ -62,3 +62,17 @@ internal class VolumeInteraction(
     settling = null
   }
 }
+
+/** Hardware volume keys as a keyboard burst on the PC volume. */
+internal object VolumeKeys {
+  /** Only where the PC volume is the obvious target; a panel on top keeps the phone's keys. */
+  fun controlsPc(tab: Tab, resumed: Boolean, connected: Boolean, audio: Boolean, panelOpen: Boolean): Boolean =
+    resumed && connected && audio && !panelOpen && (tab == Tab.TOUCHPAD || tab == Tab.MEDIA)
+
+  /** Next multiple of 5 in the pressed direction, so 33 goes to 35 or 30; stays within 0..100. */
+  fun step(current: Int, up: Boolean): Int {
+    val value = current.coerceIn(0, 100)
+    val next = if (up) (value / 5 + 1) * 5 else ((value + 4) / 5 - 1) * 5
+    return next.coerceIn(0, 100)
+  }
+}

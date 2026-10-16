@@ -5,13 +5,23 @@ import org.json.JSONObject
 import java.util.UUID
 
 internal sealed interface Incoming {
-  data class Welcome(val id: String, val pcId: String, val pcName: String, val input: Boolean) : Incoming
+  data class Welcome(val id: String, val pcId: String, val pcName: String, val input: Boolean, val files: Boolean = false) : Incoming
+  /** Sent before the ack of a file.offer; [id] is the offer request id. */
+  data class FileTicket(val id: String, val transferId: String, val ticket: String, val chunkBytes: Int, val windowBytes: Int) : Incoming
   data class PairPending(val id: String) : Incoming
   data class PairResult(val id: String, val pcId: String, val pcName: String, val token: String) : Incoming
   data class State(val snapshot: Snapshot) : Incoming
   data class Clipboard(val eventId: String, val revision: Long, val text: String, val automatic: Boolean) : Incoming
   data class Ack(val id: String) : Incoming
   data class Error(val id: String, val code: String, val message: String, val retryable: Boolean) : Incoming
+}
+
+/** Text messages of the short-lived /v1/files socket. */
+internal sealed interface FileMessage {
+  data class Accept(val id: String, val transferId: String) : FileMessage
+  data class Progress(val transferId: String, val received: Long) : FileMessage
+  data class Done(val id: String, val transferId: String, val name: String) : FileMessage
+  data class Error(val id: String, val code: String, val message: String, val retryable: Boolean) : FileMessage
 }
 
 internal class ClipboardEvents {
@@ -28,9 +38,14 @@ internal class ClipboardEvents {
 
 internal object Protocol {
   const val MAX_FRAME = 524288
+  /** Text limit the PC applies on /v1/files; nothing legitimate comes close. */
+  const val MAX_FILE_FRAME = 4096
+  const val MAX_CHUNK = 65536
+  private const val MAX_WINDOW = 16777216
   private val tokenPattern = Regex("[a-fA-F0-9]{64}")
-  private val errorCodes = setOf("invalid_message", "version_mismatch", "unauthorized", "pairing_expired", "pairing_denied", "rate_limited", "unavailable", "conflict", "sensitive", "too_large", "clipboard_busy", "internal")
-  private val capabilities = setOf("audio", "media", "clipboard.text", "input.control")
+  private val lowerHex = Regex("[a-f0-9]{64}")
+  private val errorCodes = setOf("invalid_message", "version_mismatch", "unauthorized", "pairing_expired", "pairing_denied", "rate_limited", "unavailable", "conflict", "sensitive", "too_large", "clipboard_busy", "internal", "file_type", "file_busy", "file_integrity", "storage")
+  private val capabilities = setOf("audio", "media", "clipboard.text", "input.control", "file.transfer")
   private val keys = setOf("enter", "backspace", "tab", "escape", "left", "right", "up", "down", "delete", "home", "end")
   fun uuid(value: String): Boolean = try { UUID.fromString(value).toString().equals(value, true) } catch (_: Exception) { false }
   fun validText(value: String, limit: Int = 65536, input: Boolean = false): Boolean {
@@ -97,14 +112,15 @@ internal object Protocol {
     val o = JSONObject(raw)
     if (number(o, "v") != 1L) return null
     when (str(o, "type")) {
-      "welcome" -> { exact(o, "v", "type", "id", "pcId", "pcName", "capabilities"); val arr = array(o,"capabilities"); if (arr.length() > 16) return null; val caps = (0 until arr.length()).map { arr.opt(it) as? String ?: return null }; if (!caps.all { it in capabilities }) return null; Incoming.Welcome(uid(o,"id"),uid(o,"pcId"),str(o,"pcName").also { if (!validText(it, 256)) return null },"input.control" in caps) }
+      "welcome" -> { exact(o, "v", "type", "id", "pcId", "pcName", "capabilities"); val arr = array(o,"capabilities"); if (arr.length() > 16) return null; val caps = (0 until arr.length()).map { arr.opt(it) as? String ?: return null }; if (!caps.all { it in capabilities }) return null; Incoming.Welcome(uid(o,"id"),uid(o,"pcId"),str(o,"pcName").also { if (!validText(it, 256)) return null },"input.control" in caps,"file.transfer" in caps) }
+      "file.ticket" -> { exact(o,"v","type","id","transferId","ticket","chunkBytes","windowBytes"); val chunk=signed(o,"chunkBytes",1,MAX_CHUNK); Incoming.FileTicket(uid(o,"id"),uid(o,"transferId"),str(o,"ticket").also { if (!lowerHex.matches(it)) return null },chunk,signed(o,"windowBytes",chunk,MAX_WINDOW)) }
       "pair.pending" -> { exact(o,"v","type","id"); Incoming.PairPending(uid(o,"id")) }
       "pair.result" -> { exact(o,"v","type","id","pcId","pcName","token"); Incoming.PairResult(uid(o,"id"),uid(o,"pcId"),str(o,"pcName").also { if (!validText(it,256)) return null },str(o,"token").also { if (!tokenPattern.matches(it)) return null }) }
       "ack" -> { exact(o,"v","type","id"); Incoming.Ack(uid(o,"id")) }
       "error" -> { exact(o,"v","type","id","code","message","retryable"); Incoming.Error(uid(o,"id"),str(o,"code").also { if (it !in errorCodes) return null },str(o,"message").also { if (!validText(it,4096)) return null },bool(o,"retryable")) }
       "clipboard.event" -> { exact(o,"v","type","eventId","origin","revision","text","automatic"); if (str(o,"origin") != "windows") return null; Incoming.Clipboard(uid(o,"eventId"),number(o,"revision"),str(o,"text").also { if (!validText(it)) return null },bool(o,"automatic")) }
       "state" -> {
-        exactOptional(o,setOf("v","type","revision","audio","media","clipboardRevision","sync"),setOf("input"))
+        exactOptional(o,setOf("v","type","revision","audio","media","clipboardRevision","sync"),setOf("input","files"))
         val audio = obj(o,"audio"); exact(audio,"available","percent","muted","error")
         val error = audio.opt("error"); if (error !== JSONObject.NULL && error !is String) return null
         if (error is String && !validText(error,4096)) return null
@@ -120,11 +136,29 @@ internal object Protocol {
         }
         val sync=obj(o,"sync"); exact(sync,"upload","download","paused"); bool(sync,"upload"); bool(sync,"download"); bool(sync,"paused")
         val input = if(o.has("input")) { val i=obj(o,"input"); exact(i,"allowed","enabled"); InputState(bool(i,"allowed"),bool(i,"enabled")) } else null
-        Incoming.State(Snapshot(number(o,"revision"),a,sessions,number(o,"clipboardRevision"),input))
+        val files = if(o.has("files")) { val f=obj(o,"files"); exact(f,"allowed","maxBytes"); FilesState(bool(f,"allowed"),number(f,"maxBytes").also { if(it<1 || it>FileRules.MAX_BYTES) return null }) } else null
+        Incoming.State(Snapshot(number(o,"revision"),a,sessions,number(o,"clipboardRevision"),input,files))
       }
       else -> null
     }
   } catch (_: Exception) { null } }
+  /** Strict parser for text frames of /v1/files; anything else ends the transfer. */
+  fun parseFile(raw: String): FileMessage? { return try {
+    if (!validText(raw, MAX_FILE_FRAME)) return null
+    val o = JSONObject(raw)
+    if (number(o, "v") != 1L) return null
+    when (str(o, "type")) {
+      "file.accept" -> { exact(o,"v","type","id","transferId"); FileMessage.Accept(uid(o,"id"),uid(o,"transferId")) }
+      "file.progress" -> { exact(o,"v","type","transferId","received"); FileMessage.Progress(uid(o,"transferId"),number(o,"received").also { if (it>FileRules.MAX_BYTES) return null }) }
+      "file.done" -> { exact(o,"v","type","id","transferId","name"); FileMessage.Done(uid(o,"id"),uid(o,"transferId"),str(o,"name").also { if (!validText(it,1024,true)) return null }) }
+      "error" -> { exact(o,"v","type","id","code","message","retryable"); FileMessage.Error(uid(o,"id"),str(o,"code").also { if (it !in errorCodes) return null },str(o,"message").also { if (!validText(it,4096)) return null },bool(o,"retryable")) }
+      else -> null
+    }
+  } catch (_: Exception) { null } }
+  fun fileBegin(id: String, transferId: String, ticket: String): String? =
+    if (uuid(id) && uuid(transferId) && lowerHex.matches(ticket)) JSONObject().put("v",1).put("type","file.begin").put("id",id).put("transferId",transferId).put("ticket",ticket).toString() else null
+  fun fileEnd(id: String, transferId: String, sha256: String): String? =
+    if (uuid(id) && uuid(transferId) && lowerHex.matches(sha256)) JSONObject().put("v",1).put("type","file.end").put("id",id).put("transferId",transferId).put("sha256",sha256).toString() else null
   fun action(a: RemoteAction): JSONObject? = try {
     when(a) {
       RemoteAction.StateGet -> JSONObject().put("kind","state.get")
@@ -141,6 +175,8 @@ internal object Protocol {
       is RemoteAction.PointerScroll -> if(a.steps in -10..10 && a.steps != 0) JSONObject().put("kind","pointer.scroll").put("steps",a.steps) else null
       is RemoteAction.KeyboardText -> if(validText(a.text,1024,true)) JSONObject().put("kind","keyboard.text").put("text",a.text) else null
       is RemoteAction.KeyboardKey -> if(a.key in keys) JSONObject().put("kind","keyboard.key").put("key",a.key) else null
+      is RemoteAction.FileOffer -> if(uuid(a.transferId) && FileRules.offerValid(a.name,a.size,a.mime)) JSONObject().put("kind","file.offer").put("transferId",a.transferId).put("name",a.name).put("size",a.size).put("mime",a.mime) else null
+      is RemoteAction.FileCancel -> if(uuid(a.transferId)) JSONObject().put("kind","file.cancel").put("transferId",a.transferId) else null
     }
   } catch (_: Exception) { null }
 }

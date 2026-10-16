@@ -149,7 +149,6 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
     background = ui.rounded(p.surfaceSunken, 12f)
     setPadding(ui.dp(12), ui.dp(10), ui.dp(12), ui.dp(10))
   }
-  private val strip = FingerprintStripView(ui)
   private val disconnect = ui.button("Desconectar", ButtonStyle.OUTLINED, R.drawable.ic_unplug) { client.disconnect() }
   private val reconnect = ui.button("Reconectar", ButtonStyle.FILLED, R.drawable.ic_refresh_cw) { client.reconnect() }
   private val other = ui.button("Outro PC", ButtonStyle.TONAL, R.drawable.ic_scan_qr_code) { host.openPairingSheet() }
@@ -189,8 +188,7 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
         addView(ui.text("Identidade conferida a cada conexão", TextStyle.LABEL), ui.weighted())
       })
       addView(groups, ui.matchWrap())
-      addView(strip)
-      addView(ui.text("As cores e os blocos devem ser iguais aos de Diagnóstico no PC.", TextStyle.CAPTION, p.textTertiary))
+      addView(ui.text("Os blocos devem ser iguais aos de Diagnóstico no PC.", TextStyle.CAPTION, p.textTertiary))
     })
     addView(ui.row(8).apply { addView(disconnect, ui.weighted()); addView(reconnect, ui.weighted()); addView(other, ui.weighted()) })
     addView(ui.divider())
@@ -315,7 +313,6 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
         values.forEach { group ->
           groups.addView(ui.text(group, TextStyle.MONO, if (fingerprint.isEmpty()) p.textTertiary else p.text).apply { setPadding(0, ui.dp(2), ui.dp(12), ui.dp(2)) })
         }
-        strip.setFingerprint(fingerprint)
         groups.contentDescription = "SHA-256 ${values.joinToString(" ")}"
       }
       disconnect.visibility = if (connected) View.VISIBLE else View.GONE
