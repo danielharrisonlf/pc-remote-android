@@ -2,8 +2,8 @@
 
 | Componente | Versão usada |
 |---|---|
-| Android / desktop | 0.3.0-kotlin / 0.3.0 |
-| Protocolo | 1 + extensão opcional input.v1 |
+| Android / desktop | 0.4.0-kotlin / 0.4.0 |
+| Protocolo | 1 + extensões opcionais input.v1 e files.v1 |
 | Android Gradle Plugin | 9.2.1 |
 | Kotlin integrado ao AGP | 2.2.10, confirmado por buildEnvironment |
 | Gradle wrapper | 9.4.1, URL versionada |
@@ -20,10 +20,10 @@ Versões diretas são exatas no Gradle. O projeto não utiliza package-lock, Her
 
 | Android | Desktop | Compatibilidade |
 |---|---|---|
-| 0.3.0-kotlin | 0.3.0 | Protocolo 1; input.v1 após consentimento nos dois aplicativos; o PC mostra a mesma faixa de cores do pareamento |
-| 0.3.0-kotlin | 0.2.x | Mesmo contrato; o PC mostra a identidade só em hexadecimal |
-| 0.2.0–0.2.4-kotlin | 0.2.x e 0.3.0 | Compatibilidade anterior preservada; input.v1 após consentimento |
-| 0.2.x e 0.3.0 | 0.1.x | Volume, mídia e clipboard; sem mouse/teclado |
+| 0.4.0-kotlin | 0.4.0 | Protocolo 1; input.v1 após consentimento nos dois aplicativos; files.v1 com **Receber imagens e PDFs do celular** ligado no PC |
+| 0.4.0-kotlin | 0.2.x e 0.3.0 | input.v1, volume (também pelas teclas físicas), mídia e clipboard; Arquivos pede para atualizar o PC e nenhum pedido de arquivo é enviado |
+| 0.2.0–0.3.0-kotlin | 0.4.0 | Contrato anterior preservado; o PC não anuncia `file.transfer` nem envia o estado `files` |
+| 0.2.x–0.4.0-kotlin | 0.1.x | Volume, mídia e clipboard; sem mouse/teclado |
 | Qualquer implementação | Sem protocolo 1 | Incompatível; rejeitado |
 
 A matriz descreve contrato; capacidades do dispositivo/player definem os controles reais. Não equivale a certificação de todos os players/hardwares.
