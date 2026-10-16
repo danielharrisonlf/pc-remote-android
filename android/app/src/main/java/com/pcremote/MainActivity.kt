@@ -23,6 +23,8 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Spinner
@@ -81,19 +83,23 @@ class MainActivity : Activity() {
     private lateinit var paused: CheckBox
     private lateinit var autoApply: CheckBox
     private lateinit var haptics: CheckBox
-    private lateinit var quickPause: Button
     private lateinit var inputHint: TextView
     private lateinit var inputArm: Button
     private lateinit var touchPad: TouchPadView
     private lateinit var inputText: EditText
     private lateinit var sendText: Button
-    private lateinit var pairHost: EditText
-    private lateinit var pairPort: EditText
-    private lateinit var pairFingerprint: EditText
     private lateinit var pairCode: EditText
     private lateinit var pairStatus: TextView
     private lateinit var pairError: TextView
-    private lateinit var discovered: LinearLayout
+    private lateinit var pairButton: Button
+    private lateinit var pcChoices: RadioGroup
+    private lateinit var pcSearching: TextView
+    private lateinit var pairWaiting: LinearLayout
+    private lateinit var pairStrip: LinearLayout
+    private lateinit var pairStripHint: TextView
+    private var selectedPc: String? = null
+    private var renderedPcs = emptyList<DiscoveredComputer>()
+    private var renderedStrip = ""
     private lateinit var addressHost: EditText
     private lateinit var addressPort: EditText
     private lateinit var reconnect: Button
@@ -194,7 +200,7 @@ class MainActivity : Activity() {
     private fun buildHome() {
         home.addView(row().apply {
             addView(label("PC Remote", 26f, true), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(button("Config.") { loadSavedAddress(); page = Page.SETTINGS; render() })
+            addView(button("Ajustes") { loadSavedAddress(); page = Page.SETTINGS; render() })
         })
         home.addView(card().apply {
             pcName = label("Nenhum PC", 20f, true); addView(pcName)
@@ -204,7 +210,7 @@ class MainActivity : Activity() {
             addView(button("Parear outro PC") { page = Page.PAIR; render(); client.startDiscovery() })
         })
 
-        home.addView(section("Volume do PC", "Controle do áudio principal do Windows."))
+        home.addView(section("Volume"))
         home.addView(card().apply {
             volumeValue = label("—", 26f, true); addView(volumeValue)
             audioHint = label("", 13f); addView(audioHint)
@@ -223,13 +229,13 @@ class MainActivity : Activity() {
             addView(volume)
             addView(row().apply {
                 addView(button("−5") { command(RemoteAction.VolumeStep(-5)) }.apply { tag = "audio" }, weighted())
-                mute = button("Silenciar") { command(RemoteAction.VolumeMute(state.snapshot?.audio?.muted != true)) }
+                mute = button("Mudo") { command(RemoteAction.VolumeMute(state.snapshot?.audio?.muted != true)) }
                 addView(mute, weighted())
                 addView(button("+5") { command(RemoteAction.VolumeStep(5)) }.apply { tag = "audio" }, weighted())
             })
         })
 
-        home.addView(section("Mídia", "Escolha uma sessão em execução no PC."))
+        home.addView(section("Mídia"))
         home.addView(card().apply {
             session = Spinner(this@MainActivity).apply {
                 minimumHeight = dp(52)
@@ -257,7 +263,7 @@ class MainActivity : Activity() {
             })
         })
 
-        home.addView(section("Área de transferência", "Envio e leitura manuais."))
+        home.addView(section("Área de transferência"))
         home.addView(card().apply {
             clipboardDraft = edit("Texto para enviar ao PC", true).apply {
                 minLines = 3; maxLines = 6
@@ -269,10 +275,10 @@ class MainActivity : Activity() {
                 client.sendClipboard(clipboardDraft.text.toString()) { result -> finishCommand(result, "Texto enviado") }
             }; addView(sendClipboard)
             sendCopiedText = button("Enviar texto copiado") {
-                client.sendClipboard(null) { result -> finishCommand(result, "Texto copiado enviado") }
+                client.sendClipboard(null) { result -> finishCommand(result, "Texto enviado") }
             }; addView(sendCopiedText)
-            getClipboard = button("Ler do PC") {
-                client.getClipboard { result -> finishCommand(result, "Texto recebido") }
+            getClipboard = button("Buscar do PC") {
+                client.getClipboard { result -> finishCommand(result, null) }
             }; addView(getClipboard)
             received = label("Nada recebido ainda", 15f).apply {
                 setTextIsSelectable(true); minHeight = dp(52); contentDescription = "Texto recebido do PC"
@@ -282,30 +288,28 @@ class MainActivity : Activity() {
             }; addView(copyClipboard)
         })
 
-        home.addView(section("Sincronização", "Escolha cada direção separadamente."))
+        home.addView(section("Sincronização"))
         home.addView(card().apply {
-            upload = check("Celular → PC", "Enviar novas cópias do celular") { p -> client.setPreferences(state.preferences.copy(upload = p)) }
+            upload = check("Celular → PC", "Envia o que você copiar no celular") { p -> client.setPreferences(state.preferences.copy(upload = p)) }
             addView(upload)
-            download = check("PC → celular", "Receber novas cópias do PC") { p ->
+            download = check("PC → celular", "Recebe o que você copiar no PC") { p ->
                 client.setPreferences(state.preferences.copy(download = p))
                 if (p) requestNotificationPermission()
             }; addView(download)
-            paused = check("Sincronização pausada", "Pausar as duas direções") { p -> client.setPreferences(state.preferences.copy(paused = p)) }
+            paused = check("Pausar sincronização", "Pausa os dois sentidos") { p -> client.setPreferences(state.preferences.copy(paused = p)) }
             addView(paused)
-            quickPause = button("Pausar sincronização") { client.setPreferences(state.preferences.copy(paused = !state.preferences.paused)) }
-            addView(quickPause)
         })
 
-        home.addView(section("Mouse e teclado", "Ative manualmente. O PC precisa permitir entrada remota."))
+        home.addView(section("Mouse e teclado"))
         home.addView(card().apply {
             inputHint = label("", 14f); addView(inputHint)
-            inputArm = button("Ativar entrada") {
+            inputArm = button("Ativar controle") {
                 if (state.inputArmed) client.disableInput()
-                else client.enableInput { result -> finishCommand(result, "Entrada ativada") }
+                else client.enableInput { result -> finishCommand(result, null) }
             }; addView(inputArm)
-            touchPad = TouchPadView(this@MainActivity, client) { result -> finishCommand(result, "Clique enviado") }.apply {
+            touchPad = TouchPadView(this@MainActivity, client) { result -> finishCommand(result, null) }.apply {
                 minimumHeight = dp(190)
-                contentDescription = "Área de toque do mouse; deslize para mover, toque para clicar"
+                contentDescription = "Touchpad. Deslize para mover, toque para clicar"
             }; addView(touchPad, LinearLayout.LayoutParams(-1, dp(190)).apply { topMargin = dp(8); bottomMargin = dp(8) })
             addView(row().apply {
                 addView(inputButton("Clique esquerdo", RemoteAction.PointerClick("left", 1)), weighted())
@@ -316,16 +320,16 @@ class MainActivity : Activity() {
                 addView(inputButton("Rolar ↑", RemoteAction.PointerScroll(3)), weighted())
                 addView(inputButton("Rolar ↓", RemoteAction.PointerScroll(-3)), weighted())
             })
-            addView(label("O texto digitado vai para o aplicativo em foco no Windows.", 13f))
+            addView(label("O texto vai para a janela em foco no PC.", 13f).apply { setTextColor(Palette.muted) })
             inputText = edit("Texto para digitar no PC", false).apply {
                 isSingleLine = true; maxLines = 1
                 addTextChangedListener(simpleWatcher { if (::sendText.isInitialized) sendText.isEnabled = state.inputArmed && text.isNotBlank() })
             }
             addView(inputText)
-            sendText = button("Digitar no PC") {
+            sendText = button("Digitar") {
                 val value = inputText.text.toString()
-                if (!client.isInputTextAllowed(value)) { toast("Texto inválido ou maior que 1024 bytes"); return@button }
-                client.execute(RemoteAction.KeyboardText(value)) { result -> finishCommand(result, "Texto digitado") }
+                if (!client.isInputTextAllowed(value)) { toast("Texto inválido ou acima de 1024 bytes"); return@button }
+                client.execute(RemoteAction.KeyboardText(value)) { result -> finishCommand(result, null) }
             }; addView(sendText)
             addView(row().apply {
                 listOf("Enter" to "enter", "Apagar" to "backspace", "Tab" to "tab", "Esc" to "escape").forEach { (name, key) ->
@@ -350,42 +354,95 @@ class MainActivity : Activity() {
             addView(label("Parear PC", 26f, true), weighted())
             addView(button("Voltar") { navigateBack() })
         })
-        pair.addView(label("No PC, abra o convite de pareamento. A aprovação deve ser feita no PC.", 15f))
-        pairStatus = label(state.status, 16f, true); pair.addView(pairStatus)
+        pair.addView(label("No PC, clique em Parear celular e digite aqui o código.", 15f).apply { setTextColor(Palette.muted) })
         pairError = label("", 14f).apply { setTextColor(Palette.error) }; pair.addView(pairError)
         pair.addView(card().apply {
-            addView(button("Ler QR code") {
-                qrError = ""
-                qrScanner.start(this@MainActivity) { invite, problem ->
-                    if (problem != null) {
-                        qrError = problem
-                        render()
-                        toast(problem)
-                    }
-                    if (invite != null) {
-                        qrError = ""
-                        fillInvite(invite)
-                        render()
-                    }
+            pairCode = edit("Código", false).apply {
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                filters = arrayOf(android.text.InputFilter.LengthFilter(8))
+                textSize = 28f; letterSpacing = 0.15f; gravity = Gravity.CENTER
+                addTextChangedListener(simpleWatcher { updatePairButton() })
+            }; addView(pairCode)
+            pcSearching = label("Procurando PCs na rede…", 14f).apply { setTextColor(Palette.muted) }; addView(pcSearching)
+            pcChoices = RadioGroup(this@MainActivity).apply {
+                setOnCheckedChangeListener { group, id ->
+                    if (id != View.NO_ID) selectedPc = group.findViewById<RadioButton>(id)?.tag as? String
+                    updatePairButton()
                 }
-            })
-            pairHost = edit("Endereço do PC", false); addView(pairHost)
-            pairPort = edit("Porta", false).apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER }; addView(pairPort)
-            pairFingerprint = edit("Impressão digital do certificado", false); addView(pairFingerprint)
-            pairCode = edit("Código de pareamento", false).apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER }; addView(pairCode)
-            addView(button("Solicitar pareamento") {
+            }; addView(pcChoices)
+            pairButton = button("Parear") {
+                val pc = chosenPc() ?: return@button
                 qrError = ""
-                val port = pairPort.text.toString().toIntOrNull()
-                if (pairHost.text.isBlank() || port == null || port !in 1..65535 || pairFingerprint.text.isBlank() || pairCode.text.isBlank()) {
-                    toast("Preencha endereço, porta, impressão digital e código válidos"); return@button
-                }
-                client.pair(pairHost.text.toString().trim(), port, pairFingerprint.text.toString().trim(), pairCode.text.toString().trim())
+                client.pairWithCode(pc, pairCode.text.toString())
                 hideKeyboard()
-            })
+            }; addView(pairButton)
         })
-        pair.addView(section("PCs encontrados", "Use a descoberta apenas para preencher endereço e porta."))
-        discovered = column(); pair.addView(discovered)
-        pair.addView(button("Procurar novamente") { client.startDiscovery() })
+        pairWaiting = card().apply {
+            pairStatus = label("", 18f, true); addView(pairStatus)
+            pairStrip = row(); addView(pairStrip, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(4) })
+            pairStripHint = label("As cores devem ser iguais às do PC.", 14f).apply { setTextColor(Palette.muted) }; addView(pairStripHint)
+        }; pair.addView(pairWaiting)
+        pair.addView(button("Ler QR Code") {
+            qrError = ""
+            qrScanner.start(this@MainActivity) { invite, problem ->
+                if (problem != null) {
+                    qrError = problem
+                    render()
+                    toast(problem)
+                }
+                if (invite != null) {
+                    qrError = ""
+                    client.pair(invite.host, invite.port, invite.fingerprint, invite.code)
+                    render()
+                }
+            }
+        })
+    }
+
+    private fun pcKey(pc: DiscoveredComputer) = pc.id.ifEmpty { "${pc.host}:${pc.port}" }
+    private fun chosenPc() = state.discovered.firstOrNull { pcKey(it) == selectedPc }
+    private fun pairingInProgress() = state.status == "Pareando" || state.status == "Aguardando aprovação"
+
+    private fun updatePairButton() {
+        if (!::pairButton.isInitialized) return
+        pairButton.isEnabled = pairCode.text.count(Char::isDigit) == 8 && chosenPc() != null && !pairingInProgress()
+    }
+
+    private fun renderPair() {
+        val pcs = state.discovered
+        if (pcs != renderedPcs) {
+            renderedPcs = pcs
+            if (pcs.none { pcKey(it) == selectedPc }) selectedPc = pcs.singleOrNull()?.let(::pcKey)
+            pcChoices.setOnCheckedChangeListener(null)
+            pcChoices.removeAllViews()
+            pcs.forEach { pc ->
+                pcChoices.addView(RadioButton(this).apply {
+                    id = View.generateViewId(); tag = pcKey(pc); text = pc.name
+                    textSize = 16f; minHeight = dp(52); setTextColor(Palette.text)
+                    isChecked = pcKey(pc) == selectedPc
+                })
+            }
+            pcChoices.setOnCheckedChangeListener { group, id ->
+                if (id != View.NO_ID) selectedPc = group.findViewById<RadioButton>(id)?.tag as? String
+                updatePairButton()
+            }
+        }
+        pcSearching.visibility = if (pcs.isEmpty()) View.VISIBLE else View.GONE
+        val waiting = pairingInProgress()
+        pairWaiting.visibility = if (waiting) View.VISIBLE else View.GONE
+        pairStatus.text = if (state.status == "Aguardando aprovação") "Confirme no PC" else "Conectando…"
+        if (state.pairingFingerprint != renderedStrip) {
+            renderedStrip = state.pairingFingerprint
+            pairStrip.removeAllViews()
+            Fingerprint.swatches(renderedStrip).forEach { swatch ->
+                pairStrip.addView(View(this).apply { setBackgroundColor(swatch.argb()) }, LinearLayout.LayoutParams(dp(18), dp(22)))
+            }
+            pairStrip.contentDescription = "Cores da identidade do PC"
+        }
+        val showColors = waiting && renderedStrip.isNotEmpty()
+        pairStrip.visibility = if (showColors) View.VISIBLE else View.GONE
+        pairStripHint.visibility = pairStrip.visibility
+        updatePairButton()
     }
 
     private fun buildSettings() {
@@ -394,14 +451,14 @@ class MainActivity : Activity() {
             addView(button("Voltar") { navigateBack() })
         })
         settings.addView(card().apply {
-            autoApply = check("Aplicar cópias automaticamente", "Substituir a área de transferência do celular ao receber") { p ->
+            autoApply = check("Copiar automaticamente", "Copia no celular o texto recebido do PC") { p ->
                 client.setPreferences(state.preferences.copy(autoApply = p))
             }; addView(autoApply)
-            haptics = check("Resposta tátil", "Vibrar após comandos confirmados") { p ->
+            haptics = check("Vibração", "Vibra quando o PC confirma um comando") { p ->
                 client.setPreferences(state.preferences.copy(haptics = p))
             }; addView(haptics)
         })
-        settings.addView(section("Endereço salvo", "Altere o endereço sem substituir a identidade verificada do PC."))
+        settings.addView(section("Endereço do PC"))
         settings.addView(card().apply {
             addressHost = edit("Endereço do PC", false); addView(addressHost)
             addressPort = edit("Porta", false).apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER }; addView(addressPort)
@@ -416,17 +473,12 @@ class MainActivity : Activity() {
             addView(button("Esquecer este PC") {
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("Esquecer este PC?")
-                    .setMessage("Remove a credencial local deste celular. Para revogar o acesso no PC, remova este celular também nas configurações do PC.")
+                    .setMessage("Para remover o acesso também no PC, revogue este celular em Dispositivos.")
                     .setNegativeButton("Cancelar", null)
                     .setPositiveButton("Esquecer") { _, _ -> client.forget(); page = Page.PAIR; render() }
                     .show()
             })
         })
-    }
-
-    private fun fillInvite(invite: Invite) {
-        pairHost.setText(invite.host); pairPort.setText(invite.port.toString())
-        pairFingerprint.setText(invite.fingerprint); pairCode.setText(invite.code)
     }
 
     private fun loadSavedAddress() {
@@ -444,7 +496,6 @@ class MainActivity : Activity() {
         val connected = state.status == "Conectado"
         pcName.text = state.pcName.ifBlank { "Nenhum PC" }
         status.text = state.status
-        pairStatus.text = state.status
         val pairingProblem = qrError.ifBlank { state.error }
         pairError.text = pairingProblem
         pairError.visibility = if (pairingProblem.isBlank()) View.GONE else View.VISIBLE
@@ -457,14 +508,14 @@ class MainActivity : Activity() {
         volume.isEnabled = audioReady
         volumeValue.text = if (audioReady) "${state.draggingVolume ?: audio!!.percent}%" else "—"
         audioHint.text = when {
-            !connected -> "Conecte ao PC para ajustar o volume."
+            !connected -> "Sem conexão"
             audio?.error?.isNotBlank() == true -> audio.error
-            !audioReady -> "O controle de áudio não está disponível neste PC."
-            else -> if (audio?.muted == true) "Áudio silenciado" else "Áudio ativo"
+            !audioReady -> "Áudio indisponível"
+            else -> if (audio?.muted == true) "Sem som" else ""
         }
         if (state.draggingVolume == null && !volume.isPressed) volume.progress = audio?.percent ?: 0
         mute.isEnabled = audioReady
-        mute.text = if (audio?.muted == true) "Ativar som" else "Silenciar"
+        mute.text = if (audio?.muted == true) "Ativar som" else "Mudo"
         setTaggedButtonState(home, "audio", audioReady)
 
         val sessions = state.snapshot?.sessions.orEmpty()
@@ -480,16 +531,7 @@ class MainActivity : Activity() {
         session.isEnabled = connected && sessions.size > 1
         val chosen = sessions.getOrNull(index)
         mediaTitle.text = chosen?.title?.ifBlank { "Sem título" } ?: "Nenhuma sessão"
-        mediaHint.text = if (!connected) "Conecte ao PC para controlar mídia" else if (chosen == null) "Nenhuma sessão de mídia disponível" else {
-            val unavailable = listOfNotNull(
-                "reproduzir".takeUnless { chosen.capabilities.play },
-                "pausar".takeUnless { chosen.capabilities.pause },
-                "anterior".takeUnless { chosen.capabilities.previous },
-                "próxima".takeUnless { chosen.capabilities.next },
-                "avançar/voltar".takeUnless { chosen.capabilities.seek }
-            )
-            if (unavailable.isEmpty()) chosen.app else "${chosen.app} · Indisponível nesta sessão: ${unavailable.joinToString(", ")}"
-        }
+        mediaHint.text = if (!connected) "Sem conexão" else chosen?.app ?: "Nada tocando"
         play.isEnabled = connected && chosen?.capabilities?.play == true
         pause.isEnabled = connected && chosen?.capabilities?.pause == true
         previous.isEnabled = connected && chosen?.capabilities?.previous == true
@@ -508,25 +550,23 @@ class MainActivity : Activity() {
             lastSharedText = state.sharedText
         }
         if (state.sharedText.isEmpty()) lastSharedText = ""
-        sharedHint.text = if (state.sharedText.isNotEmpty()) "Texto compartilhado recebido. Confira antes de enviar." else ""
+        sharedHint.text = if (state.sharedText.isNotEmpty()) "Texto compartilhado. Revise e envie." else ""
         upload.isChecked = state.preferences.upload
         download.isChecked = state.preferences.download
         paused.isChecked = state.preferences.paused
         autoApply.isChecked = state.preferences.autoApply
         haptics.isChecked = state.preferences.haptics
-        quickPause.text = if (state.preferences.paused) "Retomar sincronização" else "Pausar sincronização"
-        quickPause.isEnabled = connected
 
         val inputAllowed = connected && state.inputSupported && state.snapshot?.input?.allowed == true
         inputHint.text = when {
-            !connected -> "Conecte ao PC para usar mouse e teclado."
-            !state.inputSupported -> "Esta versão do PC não oferece entrada remota."
-            state.snapshot?.input?.allowed != true -> "Permita entrada remota nas configurações do PC."
-            state.inputActivating -> "Aguardando autorização do PC…"
-            state.inputArmed -> "Entrada ativada. Será desativada ao sair desta tela."
-            else -> "Toque em Ativar entrada para esta sessão."
+            !connected -> "Sem conexão"
+            !state.inputSupported -> "Atualize o PC Remote no Windows."
+            state.snapshot?.input?.allowed != true -> "Libere mouse e teclado no PC, em Transferência."
+            state.inputActivating -> "Aguardando o PC…"
+            state.inputArmed -> "Ativo"
+            else -> ""
         }
-        inputArm.text = if (state.inputArmed) "Desativar entrada" else if (state.inputActivating) "Ativando…" else "Ativar entrada"
+        inputArm.text = if (state.inputArmed) "Desativar controle" else if (state.inputActivating) "Ativando…" else "Ativar controle"
         inputArm.isEnabled = inputAllowed && !state.inputActivating
         val armed = inputAllowed && state.inputArmed
         touchPad.isEnabled = armed
@@ -534,13 +574,7 @@ class MainActivity : Activity() {
         sendText.isEnabled = armed && inputText.text.isNotBlank()
         setTaggedButtonState(home, "input", armed)
 
-        discovered.removeAllViews()
-        if (state.discovered.isEmpty()) discovered.addView(label("Nenhum PC encontrado", 14f))
-        state.discovered.forEach { pc ->
-            discovered.addView(button("${pc.name} · ${pc.host}:${pc.port}") {
-                pairHost.setText(pc.host); pairPort.setText(pc.port.toString())
-            })
-        }
+        renderPair()
         rendering = false
     }
 
@@ -555,14 +589,15 @@ class MainActivity : Activity() {
     }
 
     private fun command(action: RemoteAction) {
-        client.execute(action) { result -> finishCommand(result, "Comando enviado") }
+        client.execute(action) { result -> finishCommand(result, null) }
     }
 
-    private fun finishCommand(result: String?, success: String) {
+    /** Vibrates on success; a toast appears only for errors or when [success] says something new. */
+    private fun finishCommand(result: String?, success: String?) {
         runOnUiThread {
             if (result == null) {
                 if (state.preferences.haptics) root.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                toast(success)
+                success?.let(::toast)
             } else toast(result)
         }
     }
@@ -570,7 +605,7 @@ class MainActivity : Activity() {
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             AlertDialog.Builder(this)
-                .setMessage("Permita notificações para saber quando um texto novo chegar do PC.")
+                .setMessage("Permita notificações para saber quando chegar texto do PC.")
                 .setNegativeButton("Agora não", null)
                 .setPositiveButton("Permitir") { _, _ -> requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101) }
                 .show()
@@ -588,9 +623,9 @@ class MainActivity : Activity() {
         if (bold) typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         setPadding(dp(2), dp(5), dp(2), dp(5))
     }
-    private fun section(title: String, subtitle: String) = column().apply {
+    private fun section(title: String) = column().apply {
         setPadding(0, dp(20), 0, dp(5))
-        addView(label(title, 21f, true)); addView(label(subtitle, 14f).apply { setTextColor(Palette.muted) })
+        addView(label(title, 21f, true))
     }
     private fun card() = column().apply {
         background = GradientDrawable().apply { setColor(Palette.card); cornerRadius = dp(16).toFloat() }

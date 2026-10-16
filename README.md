@@ -37,7 +37,7 @@ No Linux/macOS, use `bash gradlew`. Também pode abrir `android` no Android Stud
 
 ## Pareamento e uso
 
-No PC, abra **Adicionar celular**. Escaneie o QR no Android ou informe endereço, porta, código temporário e **impressão digital exibida no PC**. Aprove o pedido no Windows. Descoberta mDNS preenche endereço, sem estabelecer confiança. WSS usa certificado fixado por SHA-256, validação normal do hostname e credenciais individuais cifradas pelo Android Keystore.
+No PC, abra **Parear celular**. No Android, digite o código de 8 dígitos e escolha o PC encontrado na rede, ou leia o QR. Aprove o pedido no Windows. Com o QR, o celular já conhece a identidade SHA-256 do PC. Com o código, ele fixa o certificado da primeira conexão e mostra a faixa de cores da identidade, que deve ser igual à exibida no PC. WSS usa o certificado fixado, validação normal do hostname e credenciais individuais cifradas pelo Android Keystore.
 
 Volume e mudo refletem o Windows; o slider limita a frequência e confirma o valor final. Selecione a sessão de mídia desejada. Reproduzir/pausar, faixa anterior/próxima e posição **−10s/+10s** têm capacidades distintas; ações indisponíveis ficam desabilitadas, com explicação. Veja [compatibilidade de mídia](docs/MEDIA-COMPATIBILITY.md); não se promete controle de todo player.
 
@@ -59,7 +59,7 @@ O [template CI](docs/ci/github-actions.yml) testa Kotlin, executa lint e gera AP
 
 A versão 0.2.1 corrige a recópia de texto recebido, estabelece baseline no ganho de foco, evita escritas idênticas e detalha erros de clipboard. Há uma [fixture opcional de validação](verification/clipboard-probe/README.md), separada do APK distribuído.
 
-A versão 0.2.3 inclui a correção de fechamento do leitor QR da 0.2.2 e revisa pareamento, falhas de gravação protegida, troca de rede e informações da sessão de mídia. Atualize instalando o APK sobre a versão Kotlin anterior; o pareamento salvo é preservado quando a assinatura corresponde. O leitor requer Google Play Services e pode precisar baixar seu módulo na primeira utilização; pareamento manual funciona sem esse módulo.
+A versão 0.2.3 inclui a correção de fechamento do leitor QR da 0.2.2 e revisa pareamento, falhas de gravação protegida, troca de rede e informações da sessão de mídia. Atualize instalando o APK sobre a versão Kotlin anterior; o pareamento salvo é preservado quando a assinatura corresponde. O leitor requer Google Play Services e pode precisar baixar seu módulo na primeira utilização; o pareamento por código funciona sem esse módulo.
 
 A versão 0.2.4 confirma o volume alterado por teclado ou acessibilidade, desativa entrada ao sair da tela de controle e descarta previews de clipboard quando a conexão termina.
 

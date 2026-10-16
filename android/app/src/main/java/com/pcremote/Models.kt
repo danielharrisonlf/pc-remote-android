@@ -6,13 +6,15 @@ data class MediaSession(val id: String, val app: String, val title: String, val 
 data class InputState(val allowed: Boolean, val enabled: Boolean)
 data class Snapshot(val revision: Long, val audio: AudioState, val sessions: List<MediaSession>, val clipboardRevision: Long, val input: InputState?)
 data class Preferences(val upload: Boolean = false, val download: Boolean = false, val paused: Boolean = false, val autoApply: Boolean = false, val haptics: Boolean = true)
-data class DiscoveredComputer(val name: String, val host: String, val port: Int)
+data class DiscoveredComputer(val name: String, val host: String, val port: Int, val id: String = "")
 data class Invite(val host: String, val port: Int, val fingerprint: String, val code: String)
 data class UiState(
     val status: String = "Desconectado", val pcName: String = "", val error: String = "",
     val snapshot: Snapshot? = null, val selectedSessionId: String = "", val receivedText: String = "", val sharedText: String = "",
     val preferences: Preferences = Preferences(), val inputSupported: Boolean = false, val inputArmed: Boolean = false,
-    val inputActivating: Boolean = false, val draggingVolume: Int? = null, val discovered: List<DiscoveredComputer> = emptyList()
+    val inputActivating: Boolean = false, val draggingVolume: Int? = null, val discovered: List<DiscoveredComputer> = emptyList(),
+    /** SHA-256 of the PC certificate during pairing, shown as a color strip to compare with the PC. */
+    val pairingFingerprint: String = "",
 )
 sealed interface RemoteAction {
     data object StateGet : RemoteAction
@@ -38,6 +40,8 @@ interface RemoteController {
     fun focusChanged(hasFocus: Boolean)
     fun background()
     fun pair(host: String, port: Int, fingerprint: String, code: String)
+    /** Pairs with a PC found on the network using only the code shown on the PC. */
+    fun pairWithCode(pc: DiscoveredComputer, code: String)
     fun reconnect()
     fun disconnect()
     fun forget()

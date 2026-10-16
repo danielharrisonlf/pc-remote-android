@@ -135,16 +135,35 @@ class RemoteClient(context: Context) : RemoteController {
   }
   override fun pair(host:String,port:Int,fingerprint:String,code:String) = run {
     val h=host.trim(); val fp=fingerprint.trim().replace(":","").lowercase()
-    if(!addressValid(h,port) || !fp.matches(Regex("[a-f0-9]{64}")) || !code.trim().matches(Regex("[0-9]{8}"))) { fail("Confira endereço, porta, código e fingerprint."); return@run }
+    if(!addressValid(h,port) || !fp.matches(Regex("[a-f0-9]{64}")) || !code.trim().matches(Regex("[0-9]{8}"))) { fail("QR Code inválido."); return@run }
+    startPairing(h,port,fp,code.trim())
+  }
+  override fun pairWithCode(pc:DiscoveredComputer,code:String) = run {
+    val digits=code.filter(Char::isDigit)
+    if(!addressValid(pc.host,pc.port) || !digits.matches(Regex("[0-9]{8}"))) { fail("Digite os 8 dígitos do código."); return@run }
+    // No QR means no known identity yet: trust the certificate of this first
+    // connection, pin it, and show its colors so the user can compare with the PC.
+    startPairing(pc.host,pc.port,"",digits)
+  }
+  private fun startPairing(host:String,port:Int,fingerprint:String,code:String) {
     if(pairingHandshake) {
       close(false)
       restoreFailedPair()
     }
     previousPairEndpoint=endpoint?.takeIf { it.token.isNotBlank() } ?: store.restore()
     close(false)
-    requestedDisconnect=false; endpoint=PairedComputer(h,port,fp,UUID.randomUUID().toString(),"Celular Android")
+    requestedDisconnect=false; endpoint=PairedComputer(host,port,fingerprint,UUID.randomUUID().toString(),deviceName())
     pairingHandshake=true
-    pairCode=code.trim(); patch { it.copy(status="Pareando",error="",snapshot=null,receivedText="") }; open(false)
+    pairCode=code; patch { it.copy(status="Pareando",error="",snapshot=null,receivedText="",pairingFingerprint=fingerprint) }; open(false)
+  }
+  /** Shown in the PC approval prompt, e.g. "Samsung SM-S918B"; the PC accepts up to 80 bytes. */
+  private fun deviceName():String {
+    val brand=Build.BRAND.orEmpty().trim().replaceFirstChar { it.uppercase() }
+    val model=Build.MODEL.orEmpty().trim()
+    val name=(if(brand.isNotEmpty() && model.lowercase().startsWith(brand.lowercase())) model else "$brand $model").filter { it.code>=0x20 && it.code!=0x7f }.trim()
+    var result=name.ifEmpty { "Celular Android" }
+    while(result.toByteArray(Charsets.UTF_8).size>80) result=result.dropLast(1).trim()
+    return result
   }
   private fun addressValid(host:String,port:Int)=port in 1..65535 && host.matches(Regex("[a-zA-Z0-9.-]{1,253}")) && !host.contains("..")
   override fun reconnect() = run { requestedDisconnect=false; autoReconnect() }
@@ -193,6 +212,10 @@ class RemoteClient(context: Context) : RemoteController {
     reconnectTask?.let(main::removeCallbacks); reconnectTask=null
     generation++; val own=generation; retireClipboard(); authenticated=false; clearDisarm(); dropInput(); rejectPending()
     patch { it.copy(status=if(reconnecting) "Reconectando" else "Conectando",snapshot=null,inputSupported=false) }
+    // Only a code pairing starts without a pinned identity; every other connection pins.
+    val firstUse=e.fingerprint.isEmpty() && pairCode!=null
+    if(e.fingerprint.isEmpty() && !firstUse) { fail("Pareie este PC de novo."); lost(own); return }
+    val observed=java.util.concurrent.atomic.AtomicReference<String?>(null)
     try {
       val trust=object:X509TrustManager {
         override fun getAcceptedIssuers():Array<X509Certificate> = emptyArray()
@@ -201,7 +224,7 @@ class RemoteClient(context: Context) : RemoteController {
           if(chain.size!=1) throw CertificateException("chain")
           chain[0].checkValidity()
           val digest=MessageDigest.getInstance("SHA-256").digest(chain[0].encoded).joinToString("") { "%02x".format(it) }
-          if(digest!=e.fingerprint) throw CertificateException("fingerprint")
+          if(firstUse) observed.set(digest) else if(digest!=e.fingerprint) throw CertificateException("fingerprint")
         }
       }
       val ssl=SSLContext.getInstance("TLS").apply { init(null,arrayOf<TrustManager>(trust),SecureRandom()) }
@@ -214,6 +237,13 @@ class RemoteClient(context: Context) : RemoteController {
       socket=client!!.newWebSocket(Request.Builder().url("wss://pc-remote.local:${e.port}/v1/ws").header("X-PC-Remote-Features","input.v1").build(),object:WebSocketListener() {
         override fun onOpen(ws:WebSocket,response:Response) { main.post {
           if(own!=generation) { ws.close(1000,null); return@post }
+          if(firstUse) {
+            val fingerprint=observed.get()
+            if(fingerprint==null) { ws.close(1000,null); fail("Não foi possível verificar o PC."); lost(own); return@post }
+            endpoint=endpoint?.copy(fingerprint=fingerprint)
+            patch { it.copy(pairingFingerprint=fingerprint) }
+          }
+          val e=endpoint ?: return@post
           val id=UUID.randomUUID().toString(); val code=pairCode
           if(code!=null) { pairId=id; patch { it.copy(status="Pareando") }; ws.send(JSONObject().put("v",1).put("type","pair.request").put("id",id).put("deviceId",e.deviceId).put("deviceName",e.deviceName).put("code",code).toString()) }
           else { helloId=id; ws.send(JSONObject().put("v",1).put("type","hello").put("id",id).put("deviceId",e.deviceId).put("token",e.token).toString()) }
@@ -222,9 +252,9 @@ class RemoteClient(context: Context) : RemoteController {
         override fun onMessage(ws:WebSocket,bytes:ByteString) { ws.close(1003,null) }
         override fun onClosing(ws:WebSocket,code:Int,reason:String) { ws.close(code,null) }
         override fun onClosed(ws:WebSocket,code:Int,reason:String) { main.post { lost(own) } }
-        override fun onFailure(ws:WebSocket,t:Throwable,response:Response?) { main.post { if(own==generation) { fail(if(t is javax.net.ssl.SSLException) "Identidade TLS do PC não confere ou certificado expirou." else "Não foi possível conectar ao PC na rede local."); lost(own) } } }
+        override fun onFailure(ws:WebSocket,t:Throwable,response:Response?) { main.post { if(own==generation) { fail(if(t is javax.net.ssl.SSLException) "A identidade do PC não confere." else "PC não encontrado na rede."); lost(own) } } }
       })
-    } catch (_:Exception) { fail("Endereço ou certificado inválido."); lost(own) }
+    } catch (_:Exception) { fail("Não foi possível conectar ao PC."); lost(own) }
   }
   private fun onMessage(ws:WebSocket,msg:Incoming) {
     when(msg) {
@@ -255,7 +285,7 @@ class RemoteClient(context: Context) : RemoteController {
           try { store.clear() } catch (_:Exception) { fail("Não foi possível remover a credencial local. Tente novamente.") }
           endpoint=null
         }
-        val message=when(msg.code) { "pairing_expired"->"Código expirou. Gere outro no PC."; "pairing_denied"->"Pareamento recusado no PC."; "rate_limited"->"Muitas tentativas. Aguarde."; "unauthorized"->"Acesso revogado. Pareie novamente."; "unavailable"->"Outro celular já controla este PC."; else->"Pareamento ou autenticação falhou." }
+        val message=when(msg.code) { "pairing_expired"->"Código incorreto ou expirado."; "pairing_denied"->"Pareamento recusado no PC."; "rate_limited"->"Muitas tentativas. Aguarde um pouco."; "unauthorized"->"Acesso revogado. Pareie de novo."; "unavailable"->"Outro celular já está conectado a este PC."; else->"Não foi possível conectar." }
         close(true)
         if(failedPairing) restoreFailedPair()
         patch { it.copy(status="Desconectado",error=message) }
@@ -442,7 +472,7 @@ class RemoteClient(context: Context) : RemoteController {
     val listener=object:NsdManager.DiscoveryListener {
       override fun onDiscoveryStarted(serviceType:String) {}
       override fun onDiscoveryStopped(serviceType:String) {}
-      override fun onStartDiscoveryFailed(serviceType:String,errorCode:Int) { main.post { discovery=null; fail("Descoberta indisponível. Use o endereço manual.") } }
+      override fun onStartDiscoveryFailed(serviceType:String,errorCode:Int) { main.post { discovery=null; fail("Não foi possível procurar PCs na rede.") } }
       override fun onStopDiscoveryFailed(serviceType:String,errorCode:Int) {}
       override fun onServiceLost(serviceInfo:NsdServiceInfo) { main.post { patch { v -> v.copy(discovered=v.discovered.filterNot { it.name==serviceInfo.serviceName }) } } }
       override fun onServiceFound(serviceInfo:NsdServiceInfo) { try { nsd.resolveService(serviceInfo,object:NsdManager.ResolveListener {
@@ -450,10 +480,10 @@ class RemoteClient(context: Context) : RemoteController {
         override fun onServiceResolved(info:NsdServiceInfo) { main.post {
           val host=(info.host as? Inet4Address)?.hostAddress ?: return@post
           if(!addressValid(host,info.port)) return@post
-          val item=DiscoveredComputer(info.serviceName,host,info.port)
+          val advertised=info.attributes["id"]?.toString(Charsets.UTF_8)
+          val item=DiscoveredComputer(info.serviceName,host,info.port,advertised.orEmpty())
           patch { it.copy(discovered=(it.discovered.filterNot { d -> d.name==item.name }+item).takeLast(50)) }
           val e=endpoint ?: return@post
-          val advertised=info.attributes["id"]?.toString(Charsets.UTF_8)
           if(foreground && !requestedDisconnect && socket==null && e.token.isNotBlank() && e.pcId==advertised) {
             endpoint=e.copy(host=host,port=info.port); open(true)
           }
@@ -469,7 +499,7 @@ class RemoteClient(context: Context) : RemoteController {
       if(Build.VERSION.SDK_INT>=33 && app.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) return
       val intent=Intent(app,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
       val pending=PendingIntent.getActivity(app,7,intent,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-      val notification=NotificationCompat.Builder(app,"clipboard").setSmallIcon(R.mipmap.ic_launcher).setContentTitle("Texto recebido do PC").setContentText("Abra o PC Remote para copiar.").setContentIntent(pending).setAutoCancel(true).build()
+      val notification=NotificationCompat.Builder(app,"clipboard").setSmallIcon(R.mipmap.ic_launcher).setContentTitle("Texto recebido do PC").setContentText("Toque para abrir.").setContentIntent(pending).setAutoCancel(true).build()
       (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(7,notification)
     } catch (_:RuntimeException) { /* Keep the received text in memory for the next foreground visit. */ }
   }
