@@ -142,9 +142,10 @@ internal class MediaScreen(private val host: ScreenHost, private val volume: Vol
     val audio = state.snapshot?.audio
     val ready = audio?.available == true
     val percent = state.draggingVolume ?: audio?.percent ?: 0
+    // The pending value also follows the phone's volume keys; a finger on the slider wins.
     if (!seek.isPressed) {
       volumeValue.text = percent.toString()
-      if (state.draggingVolume == null) seek.progress = percent
+      seek.progress = percent
     }
     volumeValue.contentDescription = "Volume $percent por cento"
     val muted = audio?.muted == true

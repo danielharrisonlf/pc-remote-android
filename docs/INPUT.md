@@ -4,7 +4,17 @@ Nesta branch, o controle usa Views nativas Kotlin no Android e `SendInput` da cr
 
 ## Permissão e alvo
 
-Permissão `allowInput` começa falsa no Windows. Ativação da sessão exige outra ação no Android, sempre perdida ao reconectar ou retomar após segundo plano. Use a ação da bandeja para interromper rapidamente. Essa ação invalida a conexão atual para descartar inclusive pedidos de ativação já em trânsito; o Android reconecta desarmado e exige nova ativação. Não existem estados de botão ou tecla presos entre requests.
+Permissão `allowInput` começa falsa no Windows. Ativação da sessão exige outra ação no Android: **Ativar touchpad**. Use a ação da bandeja para interromper rapidamente. Essa ação invalida a conexão atual para descartar inclusive pedidos de ativação já em trânsito; o Android reconecta desarmado e exige nova ativação. Não existem estados de botão ou tecla presos entre requests.
+
+## Ciclo de vida do touchpad
+
+Depois que o PC confirma a ativação, o touchpad fica ligado durante a conexão. Trocar de aba ou receber um Compartilhar não muda nada; abrir o seletor de arquivos é uma pausa, descrita abaixo.
+
+- **Desliga de vez** com **Desligar**, com o fim da conexão (queda, Desconectar, Remover este PC, pareamento novo, ação de emergência do PC), quando o PC bloqueia a entrada (`allowed: false`) ou a desliga por conta própria (`enabled: false` com o celular armado) e quando o PC recusa ou não confirma uma ativação ou uma desativação. Ligar de novo exige tocar em **Ativar touchpad**.
+- **Pausa** quando o app vai para segundo plano ou a janela perde o foco (aviso do sistema, painel de notificações, diálogo). O Android desarma o PC na hora, com `input.enable` falso, e descarta movimentos e cliques pendentes: um celular fora de uso nunca deixa o PC armado. A intenção do usuário continua guardada.
+- **Volta sozinho** quando o app está de novo em primeiro plano com foco, na mesma conexão autenticada e com a permissão do PC: o Android repete o pedido de ativação. Se a desativação da pausa ainda não terminou, a nova ativação espera por ela. Enquanto isso o touchpad mostra **Ativando…** e o painel **Digitar no PC** continua aberto.
+
+A decisão fica em `InputIntent.kt`, coberta por testes JVM; o painel de digitação continua dentro da janela para não tirar o foco.
 
 Texto e teclas vão ao aplicativo atualmente em foco no Windows. Isso é um teclado remoto: um Enter explícito pode confirmar uma ação na janela escolhida. Selecione e confira a janela antes de digitar. Este controle não fornece imagem da tela, seleção de alvo por aplicativo nem modo de arrastar com botão mantido.
 
@@ -18,4 +28,4 @@ Fontes oficiais: [SendInput](https://learn.microsoft.com/en-us/windows/win32/api
 
 ## Validação
 
-Regras de payload, construção de eventos, consentimento, compatibilidade legada e descarte de filas devem ser verificadas pelos testes de ambos os repositórios. A lista executada e pendências estão em [TESTING.md](TESTING.md). Para teste manual, use uma janela descartável de editor de texto: confira movimento, clique, rolagem, acentos/emoji, teclas comuns, bloqueio no PC, segundo plano e reconexão. Não realize testes de digitação em janelas com operações reais do usuário.
+Regras de payload, construção de eventos, consentimento, compatibilidade legada e descarte de filas devem ser verificadas pelos testes de ambos os repositórios. A lista executada e pendências estão em [TESTING.md](TESTING.md). Para teste manual, use uma janela descartável de editor de texto: confira movimento, clique, rolagem, acentos/emoji, teclas comuns, bloqueio no PC, troca de aba, segundo plano e retorno, e reconexão. Não realize testes de digitação em janelas com operações reais do usuário.

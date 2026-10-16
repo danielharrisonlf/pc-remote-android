@@ -33,13 +33,15 @@ internal interface ScreenHost {
   val client: RemoteController
   val themeMode: ThemeMode
   val update: UpdateState
-  /** In-window panels; a Dialog would take focus and disarm input. */
+  /** In-window panels; a Dialog would take focus and pause input. */
   val panels: PanelLayer
   fun notify(message: String, tone: Tone = Tone.ACCENT)
   fun haptic()
   /** Errors become snackbars; success shows one only when it says something new. */
   fun result(error: String?, success: String? = null)
   fun navigate(tab: Tab)
+  /** System document picker for images and PDFs; the result joins the file queue. */
+  fun pickFiles()
   fun scanQr()
   fun openPairingSheet()
   fun openUpdate()
@@ -65,7 +67,6 @@ internal class TouchpadScreen(private val host: ScreenHost) : Screen {
   private var enabled = false
   private var blocker: Blocker? = null
   private var activating = false
-  private val chip = ui.chip()
   private val stop = ui.button("Desligar", ButtonStyle.TEXT, R.drawable.ic_hand) { client.disableInput() }
   private val pad = TouchPadView(ui, client, { enabled }) { button ->
     host.haptic()
@@ -109,9 +110,10 @@ internal class TouchpadScreen(private val host: ScreenHost) : Screen {
 
   override val view: View = ui.column(12).apply {
     setPadding(ui.dp(16), ui.dp(4), ui.dp(16), ui.dp(12))
+    // Fixed height: "Desligar" turns invisible, not gone, so the pad never jumps.
     addView(ui.row(8).apply {
+      gravity = Gravity.CENTER_VERTICAL or Gravity.END
       minimumHeight = ui.dp(48)
-      addView(FrameLayout(context).apply { addView(chip, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_VERTICAL)) }, ui.weighted())
       addView(stop)
     })
     addView(FrameLayout(context).apply {
@@ -173,13 +175,14 @@ internal class TouchpadScreen(private val host: ScreenHost) : Screen {
     val connected = state.status == "Conectado"
     val allowed = state.snapshot?.input?.allowed
     enabled = connected && state.inputArmed && allowed == true && state.snapshot?.input?.enabled == true
-    chip.set(if (enabled) Tone.SUCCESS else Tone.NEUTRAL, if (enabled) "Controle ativo" else "Controle desligado")
+    // A paused session (focus loss, background) re-arms by itself; it shows as activating.
+    val waking = state.inputActivating || state.inputResuming
     stop.visibility = if (enabled) View.VISIBLE else View.INVISIBLE
     hint.visibility = if (enabled) View.VISIBLE else View.GONE
     inputViews.forEach { it.isEnabled = enabled; it.alpha = if (enabled) 1f else 0.4f }
     pad.isEnabled = enabled
     strip.isEnabled = enabled
-    if (!enabled) keyboard.dismiss()
+    if (!enabled && !state.inputResuming) keyboard.dismiss()
 
     val next = when {
       !connected -> Blocker.DISCONNECTED
@@ -188,9 +191,9 @@ internal class TouchpadScreen(private val host: ScreenHost) : Screen {
       !enabled -> Blocker.OFF
       else -> Blocker.NONE
     }
-    if (next != blocker || (next == Blocker.OFF && activating != state.inputActivating)) {
+    if (next != blocker || (next == Blocker.OFF && activating != waking)) {
       blocker = next
-      activating = state.inputActivating
+      activating = waking
       lockContent.removeAllViews()
       val content = when (next) {
         Blocker.DISCONNECTED -> ui.emptyState(R.drawable.ic_unplug, "Sem conexão com o PC", "Conecte-se a um computador pareado para usar o touchpad.",
@@ -198,9 +201,9 @@ internal class TouchpadScreen(private val host: ScreenHost) : Screen {
         Blocker.OUTDATED -> ui.emptyState(R.drawable.ic_circle_arrow_up, "Atualize o PC Remote no Windows", "A versão do PC ainda não aceita mouse e teclado.")
         Blocker.BLOCKED -> ui.emptyState(R.drawable.ic_lock, "Bloqueado no PC", "No Windows, abra Transferência e ligue Permitir mouse e teclado pelo celular.")
         Blocker.OFF -> ui.emptyState(R.drawable.ic_touchpad, "Touchpad desligado", "Os cliques e o texto vão para a janela em foco no Windows.",
-          ui.button(if (state.inputActivating) "Ativando…" else "Ativar touchpad", ButtonStyle.FILLED, large = true) {
+          ui.button(if (waking) "Ativando…" else "Ativar touchpad", ButtonStyle.FILLED, large = true) {
             client.enableInput { error -> if (error == null) host.haptic() else host.result(error) }
-          }.apply { isEnabled = !state.inputActivating })
+          }.apply { isEnabled = !waking })
         Blocker.NONE -> null
       }
       if (content != null) lockContent.addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))

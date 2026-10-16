@@ -4,40 +4,27 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class TabNavigationTest {
-  private var disarms = 0
-  private fun navigation(initial: Tab = Tab.TOUCHPAD) = TabNavigation({ disarms++ }, initial)
-
-  @Test fun leavingTheTouchpadDisarmsInput() {
-    for (destination in listOf(Tab.MEDIA, Tab.CLIPBOARD, Tab.CONNECTION)) {
-      disarms = 0
-      val navigation = navigation()
+  @Test fun everyTabSwitchOnlyChangesTheTab() {
+    for (destination in Tab.entries) {
+      val navigation = TabNavigation(Tab.TOUCHPAD)
       navigation.goTo(destination)
       assertEquals(destination, navigation.tab)
-      assertEquals(1, disarms)
     }
   }
 
-  @Test fun refreshingTheTouchpadKeepsAnActiveSession() {
-    val navigation = navigation()
-    navigation.goTo(Tab.TOUCHPAD)
-    assertEquals(0, disarms)
-  }
-
-  @Test fun movingBetweenOtherTabsDoesNotDisarm() {
-    val navigation = navigation(Tab.MEDIA)
-    navigation.goTo(Tab.CLIPBOARD)
+  @Test fun leavingAndReturningToTheTouchpadKeepsItsTab() {
+    val navigation = TabNavigation(Tab.TOUCHPAD)
+    navigation.goTo(Tab.MEDIA)
+    navigation.goTo(Tab.CONNECTION)
     navigation.goTo(Tab.TOUCHPAD)
     assertEquals(Tab.TOUCHPAD, navigation.tab)
-    assertEquals(0, disarms)
   }
 
-  @Test fun newIntentDisarmsAndSharedTextOpensTransfer() {
-    val navigation = navigation()
+  @Test fun sharedTextOrFilesOpenTransferAndOtherIntentsKeepTheTab() {
+    val navigation = TabNavigation(Tab.TOUCHPAD)
     navigation.newIntent(shared = false)
     assertEquals(Tab.TOUCHPAD, navigation.tab)
-    assertEquals(1, disarms)
     navigation.newIntent(shared = true)
     assertEquals(Tab.CLIPBOARD, navigation.tab)
-    assertEquals(2, disarms)
   }
 }

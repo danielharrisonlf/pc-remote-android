@@ -35,13 +35,13 @@ ReleaseChecker lê `https://api.github.com/repos/danielharrisonlf/pc-remote-andr
 
 ## Clipboard e ciclo de vida
 
-ClipboardManager observa somente com app em foco. Retomar/habilitar direção estabelece baseline sem enviar conteúdo anterior. ACTION_SEND text/plain funciona em abertura inicial e onNewIntent. Texto recebido/compartilhado fica em RAM; não existe histórico ou replay. Sync inicia desligada, com direção consentida nos dois apps. Aplicação automática exige preferência e foco real.
+ClipboardManager observa somente com app em foco. Retomar/habilitar direção estabelece baseline sem enviar conteúdo anterior. ACTION_SEND text/plain funciona em abertura inicial e onNewIntent; ACTION_SEND e ACTION_SEND_MULTIPLE com PNG, JPG ou PDF põem os arquivos na fila de envio, e Activity recriada ou aberta pelos Recentes não repete o compartilhamento. Texto recebido/compartilhado fica em RAM; não existe histórico ou replay. Sync inicia desligada, com direção consentida nos dois apps. Aplicação automática exige preferência e foco real.
 
 Android 10+ não permite ler cópias de outros apps em segundo plano; serviço em primeiro plano não elimina a regra. Não há serviço permanente. Notificação genérica só pode avisar de evento que chegou enquanto conexão existia; suspensão pode interrompê-la. Abra o app ou use Compartilhar.
 
-EXTRA_IS_SENSITIVE impede envio de conteúdo marcado, inclusive leitura manual. Isso não identifica toda senha. Limite 64 KiB UTF-8; Unicode e quebras preservados; NUL/UTF-16 inválido rejeitados. UUID/revisão, ordem autoritativa do PC e supressão de eco impedem loops. Sem imagens/arquivos, abertura de links ou colagem em aplicativos.
+EXTRA_IS_SENSITIVE impede envio de conteúdo marcado, inclusive leitura manual. Isso não identifica toda senha. Limite 64 KiB UTF-8; Unicode e quebras preservados; NUL/UTF-16 inválido rejeitados. UUID/revisão, ordem autoritativa do PC e supressão de eco impedem loops. O clipboard não leva imagens nem arquivos (PNG, JPG e PDF vão por files.v1, na aba Transferir), não abre links nem cola em aplicativos.
 
-Pause cancela entrada e descoberta; callbacks de rede/backoff fazem nova autenticação e snapshot. Sem replay ou garantia de execução durante Doze. Reconectar explícito retoma tentativas depois de desconexão manual. Interface com tema claro, escuro ou do sistema, texto em sp, alvos de pelo menos 48dp, scroll e insets de ponta a ponta; Android 13+ usa OnBackInvokedCallback e versões anteriores fallback. Lint não utiliza baseline global para esconder erros. Testes físicos pendentes em TESTING.md.
+Pause desarma a entrada no PC, que volta sozinha em foco se o usuário não a desligou, e para a descoberta; callbacks de rede/backoff fazem nova autenticação e snapshot. Sem replay ou garantia de execução durante Doze. Reconectar explícito retoma tentativas depois de desconexão manual. Interface com tema claro, escuro ou do sistema, texto em sp, alvos de pelo menos 48dp, scroll e insets de ponta a ponta; Android 13+ usa OnBackInvokedCallback e versões anteriores fallback. Lint não utiliza baseline global para esconder erros. Testes físicos pendentes em TESTING.md.
 
 ## Diagnóstico do leitor QR
 

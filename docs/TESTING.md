@@ -2,6 +2,29 @@
 
 Registro da alternativa 0.2.0-kotlin em 14/10/2026. Os resultados React Native da branch main não são apresentados como testes desta implementação. Integrações reais: Android SDK/Keystore/OkHttp e Windows Rust/Core Audio/GSMTC/clipboard/SendInput. Não há simulações no produto.
 
+## Atualização 0.4.0-kotlin — touchpad persistente, teclas de volume e files.v1, 16/10/2026
+
+### Ponta a ponta no emulador, com o desktop real
+
+Emulador API 33 (x86_64), APK release 0.4.0-kotlin (versionCode 8) instalado com `adb install -r` por cima da 0.2.4, pareamento preservado. PC real em `10.0.2.2:43127`: primeiro o desktop 0.3.0 instalado, depois o executável release 0.4.0 com a mesma identidade. Não houve cliques nem texto enviados ao PC; só movimentos curtos do cursor, com a posição restaurada.
+
+- Desktop 0.3.0: conexão, touchpad ativo (painel em "Em uso"), volume e mudo do PC pelas teclas físicas. Transferir → Arquivos mostrou "Atualize o PC Remote no Windows para enviar arquivos." com o botão desligado; um PNG compartilhado ficou "aguardando o PC" e nenhum pedido de arquivo chegou ao PC.
+- Interface: barra superior sem "NN ms" (a latência aparece só no cartão de Conexão), Touchpad sem o chip "Controle ativo", cartão do PC em Conexão sem a faixa de cores.
+- Touchpad: continuou ligado em Mídia, Conexão e Transferir (sem camada de bloqueio, PC em "Em uso", movimento curto chegou). Home e volta, cortina de notificações e o seletor de documentos desarmaram o PC e o app rearmou sozinho no retorno, mostrando **Ativando…** (captura com latência de rede artificial). **Desligar**, **Interromper controle** no PC, bloqueio de "Mouse e teclado pelo celular" e o PC fechado e reaberto deixaram o touchpad desligado, também depois de trocar de aba, de ir para segundo plano ou de reconectar.
+- Teclas de volume (`input keyevent`) no Touchpad e em Mídia: 33 → 35, 35 → 30 e 33 → 30, mudo alternado, toque longo (`--longpress`) convergiu em 45 no PC e no app. O volume de mídia do celular não mudou e o painel de volume do Android não apareceu. Snackbar "Volume do PC: 35%" no Touchpad. Em Conexão e Transferir, as teclas mudaram o volume do celular.
+- Arquivos com o desktop 0.4.0: com a opção do PC desligada, aviso "No Windows, abra Transferência e ligue Receber imagens e PDFs do celular." e botão desligado; ao ligar a opção no PC, o app atualizou na hora e enviou o PNG da fila. Seletor do Android com um arquivo e com dois; Compartilhar do app Arquivos com um e com três (SEND e SEND_MULTIPLE), inclusive com o app fechado. PNG, JPG e PDFs de 3 MB e 40 MB chegaram com SHA-256 igual, `Zone.Identifier` com `ZoneId=3` e nomes `(1)`, `(2)`, `(3)` sem sobrescrever. Progresso visto no app ("8,3 de 40,0 MB", 20%) e no PC.
+- **Cancelar** a 20% e a opção desligada no PC a 4% (rede limitada com `tc`) terminaram sem arquivo nem parte no PC; o app mostrou "Envio de … cancelado." e "… não foi enviado. O PC não está recebendo arquivos agora.". Um `.png` com texto foi recusado no celular: "pcr_falso.png não é um PNG válido.".
+- Sem envio duplicado ao reabrir pelo Recentes depois de o processo ser encerrado. Texto compartilhado, **Enviar texto**, **Enviar o que copiei** e **Buscar do PC** continuaram funcionando.
+- `adb shell am start … --grant-read-uri-permission` com URI do MediaStore não serve para testar o Compartilhar: o MediaProvider recusa a leitura ao app ("O Android não deu permissão para ler o arquivo."). Por isso o Compartilhar foi feito pelo app Arquivos.
+- Não testado: celular físico e Wi-Fi real, TalkBack, arquivo acima de 50 MB, tempos limite de 20 s, recusa de assinatura pelo PC (o app confere antes) e mídia com sessão ativa.
+
+### Testes automatizados
+
+- `testDebugUnitTest --rerun assembleDebug assembleRelease lintRelease`: sucesso. **76 testes JUnit passaram**, sem falhas. Lint release: zero erros e 29 avisos, os mesmos tipos de antes, nenhum nos arquivos novos. O R8 do release passou sem regra nova de keep.
+- Testes novos: InputIntentTest (6) cobre pausa que mantém a intenção, desativação em voo que adia o rearme, bloqueio ou desligamento no PC e Desligar. TabNavigationTest (3) foi refeito: trocar de aba e receber Intent não desarmam. VolumeKeysTest (4) cobre os passos de 5%, os limites e as abas. FileRulesTest (9) cobre a limpeza de nome igual à do PC, mime, assinaturas, regras de `file.offer`, mensagens e fila. ProtocolTest ganhou 6: capacidade e estado `files` estritos, `file.ticket`, códigos novos, mensagens de `/v1/files`, ações e frames, e a leitura de `protocol-v1.examples.json`.
+- FileTransfer, o motor do envio, não tem teste JVM porque depende de Handler, ContentResolver e OkHttp; foi coberto pelos testes de ponta a ponta acima.
+- Repetido sobre o código da release: `testDebugUnitTest assembleRelease assembleSizeBaseline lintRelease`, 76 testes JUnit, lint com zero erros e 29 avisos. `PROTOCOL.md` e `protocol-v1.examples.json` são idênticos byte a byte aos do desktop.
+
 ## Atualização 0.3.0-kotlin — redesign da interface, 16/10/2026
 
 - **52 testes JUnit passaram**; `testDebugUnitTest assembleRelease assembleSizeBaseline lintRelease` concluídos. Lint: zero erros e 29 avisos. Testes novos cobrem navegação por abas, rolagem em lotes, leitura das releases do GitHub e notas de versão.
