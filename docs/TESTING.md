@@ -2,6 +2,16 @@
 
 O código contém integrações nativas reais. Testes unitários não comprovam compatibilidade de cada player, permissões do Android nem continuidade durante suspensão. Este registro distingue execução automatizada, execução no Windows deste ambiente e validações pendentes em Android físico.
 
+## Atualização 0.2.1 — revisão de bugs, 15/10/2026
+
+- **26 testes Jest passaram**, com TypeScript e ESLint aprovados. **4 testes JUnit** e as builds finais ARM64/x86_64 após o ajuste de privacidade passaram; assinatura v2 verificada, compatível com a avaliação anterior.
+- APK release x86_64 API36 abriu sem Metro, pareou com servidor TLS controlado e recuperou a credencial cifrada após encerrar/reabrir. Buffer de crash vazio.
+- Fixture Android real: cópia Unicode gerou um envio; cópia sinalizada sensível não foi enviada, inclusive na ação manual, que exibiu erro claro. ACTION_SEND com app encerrado/aberto passou; confirmação atrasada do primeiro envio preservou a segunda mensagem, enviada corretamente depois. Sem acesso ao clipboard do host.
+- O servidor controlado não substitui validação das ações Windows reais. Não se atribuem ao React Native os resultados de execução do APK Kotlin. O relatório consolidado identifica cada verificação.
+- As validações de celular físico, fabricantes/Doze, Wi-Fi real, players e leitura óptica de QR permanecem pendentes conforme a matriz abaixo.
+
+Consulte a [auditoria de segurança](SECURITY-AUDIT.md) e o [relatório de bugs e regressões de 15/10/2026](BUG-AUDIT-2026-10-15.md) para os achados, correções e evidências consolidadas.
+
 ## Validação da versão 0.2.0 — touchpad e teclado
 
 | Verificação | Resultado |

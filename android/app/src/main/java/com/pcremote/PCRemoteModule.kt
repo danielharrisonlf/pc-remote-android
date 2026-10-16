@@ -79,6 +79,8 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
   @Volatile private var socket: WebSocket? = null
   @Volatile private var client: OkHttpClient? = null
   @Volatile private var endpoint: PairedComputer? = null
+  private var pairingCandidate = false
+  private var previousPairEndpoint: PairedComputer? = null
   private var pairingCode: String? = null
   private var pairRequestId: String? = null
   private var helloRequestId: String? = null
@@ -108,12 +110,17 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
   }
 
   override fun getName() = "PCRemoteNative"
-  private fun emit(name: String, value: Any?) {
+  private fun emit(name: String, value: Any?, gen: Int? = null) {
     if (context.hasActiveReactInstance()) {
-      main.post { context.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java).emit(name, value) }
+      main.post {
+        synchronized(this) {
+          if (gen != null && gen != connectionGeneration) return@post
+          if (context.hasActiveReactInstance()) context.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java).emit(name, value)
+        }
+      }
     }
   }
-  private fun status(value: String) = emit("remote.status", value)
+  private fun status(value: String, gen: Int? = null) = emit("remote.status", value, gen)
   override fun createId(): String = UUID.randomUUID().toString()
   @Synchronized override fun addListener(eventName: String) {
     listenerCount++
@@ -127,7 +134,7 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
 
   private fun persist(e: PairedComputer) = credentials.persist(e)
   private fun restore(): PairedComputer? = credentials.restore()
-  override fun getSavedComputer(promise: Promise) {
+  @Synchronized override fun getSavedComputer(promise: Promise) {
     val e = restore()
     promise.resolve(if (e == null) "" else JSONObject().put("host", e.host).put("port", e.port).put("fingerprint", e.fingerprint).put("pcId", e.pcId).put("pcName", e.pcName).toString())
   }
@@ -144,15 +151,28 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
         .putBoolean("haptics", value.getBoolean("haptics")).apply()
     } catch (_: Exception) {}
   }
-  override fun forgetComputer() { disconnect(); prefs.edit().remove("credential").apply(); endpoint = null }
-  override fun updateAddress(host: String, port: Double, promise: Promise) {
-    val previous = endpoint ?: restore()
+  @Synchronized override fun forgetComputer() {
+    disconnect()
+    try {
+      credentials.clear()
+      endpoint = null
+    } catch (_: Exception) {
+      status("error:Não foi possível remover a credencial protegida. Tente novamente.", connectionGeneration)
+    }
+  }
+  @Synchronized override fun updateAddress(host: String, port: Double, promise: Promise) {
+    val previous = if (pairingCandidate) previousPairEndpoint else endpoint ?: restore()
     if (previous == null || previous.token.isBlank()) { promise.reject("not_paired", "Pareie um PC primeiro."); return }
     if (!host.matches(Regex("[a-zA-Z0-9.-]{1,253}")) || port !in 1.0..65535.0 || port != port.toInt().toDouble()) {
       promise.reject("invalid_address", "Informe um endereço IPv4 ou nome de computador e porta válida."); return
     }
+    val updated = previous.copy(host = host.lowercase(), port = port.toInt())
+    try { persist(updated) } catch (_: Exception) {
+      promise.reject("credential_storage", "Não foi possível proteger e salvar o endereço. Tente novamente.")
+      return
+    }
     disconnect()
-    endpoint = previous.copy(host = host.lowercase(), port = port.toInt())
+    endpoint = updated
     requestedDisconnect = false
     pairingCode = null
     open(true)
@@ -166,6 +186,8 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
       return
     }
     disconnect()
+    previousPairEndpoint = endpoint?.takeIf { it.token.isNotBlank() } ?: restore()
+    pairingCandidate = true
     requestedDisconnect = false
     endpoint = PairedComputer(host, portInt, fingerprint.lowercase(), UUID.randomUUID().toString(), deviceName.take(80))
     pairingCode = code
@@ -188,12 +210,27 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
     reconnectRunnable?.let { main.removeCallbacks(it) }
     reconnectRunnable = null
     connectionGeneration++
+    restorePreviousPair()
+    pairingCode = null
+    pairRequestId = null
+    helloRequestId = null
     pendingRemoteMessage = null
     socket?.close(1000, "Desconectado")
     socket = null
     client?.dispatcher?.executorService?.shutdown()
     client = null
-    status("disconnected")
+    status("disconnected", connectionGeneration)
+  }
+
+  private fun restorePreviousPair(): Boolean {
+    if (!pairingCandidate) return false
+    endpoint = previousPairEndpoint
+    previousPairEndpoint = null
+    pairingCandidate = false
+    pairingCode = null
+    pairRequestId = null
+    helloRequestId = null
+    return true
   }
 
   @Synchronized private fun open(isReconnect: Boolean) {
@@ -203,7 +240,7 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
     reconnectRunnable?.let { main.removeCallbacks(it) }
     connectionGeneration++
     val gen = connectionGeneration
-    status(if (isReconnect) "reconnecting" else "connecting")
+    status(if (isReconnect) "reconnecting" else "connecting", gen)
     try {
       val trust = object : X509TrustManager {
         override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
@@ -226,97 +263,127 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
         .connectTimeout(8, TimeUnit.SECONDS).pingInterval(20, TimeUnit.SECONDS).build()
       socket = client!!.newWebSocket(Request.Builder().url("wss://pc-remote.local:${e.port}/v1/ws").header("X-PC-Remote-Features", "input.v1").build(), object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
-          if (gen != connectionGeneration) { webSocket.close(1000, null); return }
-          val active = endpoint ?: return
-          val id = UUID.randomUUID().toString()
-          val pair = pairingCode
-          if (pair != null) {
-            pairRequestId = id
-            status("pairing")
-            webSocket.send(JSONObject().put("v", 1).put("type", "pair.request").put("id", id).put("deviceId", active.deviceId).put("deviceName", active.deviceName).put("code", pair).toString())
-          } else {
-            helloRequestId = id
-            webSocket.send(JSONObject().put("v", 1).put("type", "hello").put("id", id).put("deviceId", active.deviceId).put("token", active.token).toString())
+          synchronized(this@PCRemoteModule) {
+            if (gen != connectionGeneration) { webSocket.close(1000, null); return }
+            val active = endpoint ?: return
+            val id = UUID.randomUUID().toString()
+            val pair = pairingCode
+            if (pair != null) {
+              pairRequestId = id
+              status("pairing", gen)
+              webSocket.send(JSONObject().put("v", 1).put("type", "pair.request").put("id", id).put("deviceId", active.deviceId).put("deviceName", active.deviceName).put("code", pair).toString())
+            } else {
+              helloRequestId = id
+              webSocket.send(JSONObject().put("v", 1).put("type", "hello").put("id", id).put("deviceId", active.deviceId).put("token", active.token).toString())
+            }
           }
         }
         override fun onMessage(webSocket: WebSocket, text: String) {
-          if (gen != connectionGeneration || text.toByteArray(Charsets.UTF_8).size > 524_288) { webSocket.close(1009, null); return }
-          try {
-            val msg = JSONObject(text)
-            if (msg.optInt("v") != 1) { webSocket.close(1002, null); return }
-            when (msg.optString("type")) {
-              "pair.pending" -> if (msg.optString("id") == pairRequestId) status("pending") else webSocket.close(1002, null)
-              "pair.result" -> {
-                if (pairingCode == null || msg.optString("id") != pairRequestId || !msg.getString("pcId").matches(Regex("[a-fA-F0-9-]{36}"))) { webSocket.close(1002, null); return }
-                val token = msg.getString("token")
-                if (!token.matches(Regex("[a-fA-F0-9]{64}"))) { webSocket.close(1002, null); return }
-                val old = endpoint ?: return
-                val saved = old.copy(pcId = msg.getString("pcId"), pcName = msg.getString("pcName"), token = token)
-                endpoint = saved
-                persist(saved)
-                pairingCode = null
-                pairRequestId = null
-                val helloId = UUID.randomUUID().toString()
-                helloRequestId = helloId
-                webSocket.send(JSONObject().put("v", 1).put("type", "hello").put("id", helloId).put("deviceId", saved.deviceId).put("token", saved.token).toString())
-              }
-              "welcome" -> {
-                if (endpoint?.token.isNullOrBlank() || msg.optString("pcId") != endpoint?.pcId || msg.optString("id") != helloRequestId) { webSocket.close(1002, null); return }
-                helloRequestId = null
-                val capabilities = msg.optJSONArray("capabilities")
-                supportsInput = capabilities != null && (0 until capabilities.length()).any { index -> capabilities.optString(index) == "input.control" }
-                endpoint?.let { persist(it) }
-                reconnectAttempt = 0; status("connected"); emit("remote.message", text)
-              }
-              "error" -> {
-                val id = msg.optString("id")
-                if (id == pairRequestId || id == helloRequestId) {
-                  val code = msg.optString("code")
-                  requestedDisconnect = true
+          synchronized(this@PCRemoteModule) {
+            if (gen != connectionGeneration || text.toByteArray(Charsets.UTF_8).size > 524_288) { webSocket.close(1009, null); return }
+            try {
+              val msg = JSONObject(text)
+              if (msg.optInt("v") != 1) { webSocket.close(1002, null); return }
+              when (msg.optString("type")) {
+                "pair.pending" -> if (msg.optString("id") == pairRequestId) status("pending", gen) else webSocket.close(1002, null)
+                "pair.result" -> {
+                  val pcId = msg.getString("pcId")
+                  if (pairingCode == null || msg.optString("id") != pairRequestId || !UUID.fromString(pcId).toString().equals(pcId, ignoreCase = true)) { webSocket.close(1002, null); return }
+                  val token = msg.getString("token")
+                  if (!token.matches(Regex("[a-fA-F0-9]{64}"))) { webSocket.close(1002, null); return }
+                  val old = endpoint ?: return
+                  val saved = old.copy(pcId = msg.getString("pcId"), pcName = msg.getString("pcName"), token = token)
+                  endpoint = saved
                   pairingCode = null
                   pairRequestId = null
-                  helloRequestId = null
-                  if (code == "unauthorized") { prefs.edit().remove("credential").apply(); endpoint = null }
-                  val message = when (code) {
-                    "pairing_expired" -> "Código expirou. Gere outro no PC."
-                    "pairing_denied" -> "Pareamento recusado no PC."
-                    "rate_limited" -> "Muitas tentativas. Aguarde e tente novamente."
-                    "unauthorized" -> "Acesso revogado ou credencial inválida. Pareie novamente."
-                    "unavailable" -> "Outro celular já controla este PC. Desconecte-o antes de tentar novamente."
-                    else -> "Pareamento ou autenticação falhou. Confira os dados."
+                  val helloId = UUID.randomUUID().toString()
+                  helloRequestId = helloId
+                  webSocket.send(JSONObject().put("v", 1).put("type", "hello").put("id", helloId).put("deviceId", saved.deviceId).put("token", saved.token).toString())
+                }
+                "welcome" -> {
+                  if (endpoint?.token.isNullOrBlank() || msg.optString("pcId") != endpoint?.pcId || msg.optString("id") != helloRequestId) { webSocket.close(1002, null); return }
+                  val capabilities = msg.optJSONArray("capabilities")
+                  if (msg.keys().asSequence().toSet() != setOf("v", "type", "id", "pcId", "pcName", "capabilities") || msg.opt("v") != 1 || msg.opt("pcName") !is String || capabilities == null || (0 until capabilities.length()).any { index ->
+                    val capability = capabilities.opt(index)
+                    capability !is String || capability !in setOf("audio", "media", "clipboard.text", "input.control")
+                  }) { webSocket.close(1002, null); return }
+                  // A candidate may replace the saved PC only after its hello is accepted.
+                  try { endpoint?.let { persist(it) } } catch (_: Exception) {
+                    disconnect()
+                    status("error:Não foi possível proteger e salvar o pareamento. Verifique o armazenamento do celular e tente novamente.", connectionGeneration)
+                    return
                   }
-                  status("error:$message")
-                  webSocket.close(1008, null)
-                } else emit("remote.message", text)
+                  pairingCandidate = false
+                  previousPairEndpoint = null
+                  helloRequestId = null
+                  supportsInput = (0 until capabilities.length()).any { index -> capabilities.optString(index) == "input.control" }
+                  reconnectAttempt = 0; status("connected", gen); emit("remote.message", text, gen)
+                }
+                "error" -> {
+                  val id = msg.optString("id")
+                  if (id == pairRequestId || id == helloRequestId) {
+                    val code = msg.optString("code")
+                    val failedPairing = restorePreviousPair()
+                    requestedDisconnect = !failedPairing || endpoint?.token.isNullOrBlank()
+                    pairingCode = null
+                    pairRequestId = null
+                    helloRequestId = null
+                    var credentialClearFailed = false
+                    if (code == "unauthorized" && !failedPairing) {
+                      try { credentials.clear() } catch (_: Exception) { credentialClearFailed = true }
+                      endpoint = null
+                    }
+                    val message = if (credentialClearFailed) "Não foi possível remover a credencial local. Tente novamente." else when (code) {
+                      "pairing_expired" -> "Código expirou. Gere outro no PC."
+                      "pairing_denied" -> "Pareamento recusado no PC."
+                      "rate_limited" -> "Muitas tentativas. Aguarde e tente novamente."
+                      "unauthorized" -> "Acesso revogado ou credencial inválida. Pareie novamente."
+                      "unavailable" -> "Outro celular já controla este PC. Desconecte-o antes de tentar novamente."
+                      else -> "Pareamento ou autenticação falhou. Confira os dados."
+                    }
+                    status("error:$message", gen)
+                    webSocket.close(1008, null)
+                  } else emit("remote.message", text, gen)
+                }
+                "clipboard.event" -> {
+                  if (!foreground) { pendingRemoteMessage = text; notifyClipboard() } else emit("remote.message", text, gen)
+                }
+                else -> emit("remote.message", text, gen)
               }
-              "clipboard.event" -> {
-                if (!foreground) { pendingRemoteMessage = text; notifyClipboard() } else emit("remote.message", text)
-              }
-              else -> emit("remote.message", text)
-            }
-          } catch (_: Exception) { webSocket.close(1002, null) }
+            } catch (_: Exception) { webSocket.close(1002, null) }
+          }
         }
         override fun onMessage(webSocket: WebSocket, bytes: ByteString) { webSocket.close(1003, null) }
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(code, null) }
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { lost(gen) }
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-          if (gen == connectionGeneration) status("error:" + if (t is javax.net.ssl.SSLException) "Identidade TLS do PC não confere ou certificado expirou." else "Não foi possível conectar ao PC na rede local.")
-          lost(gen)
+          synchronized(this@PCRemoteModule) {
+            if (gen == connectionGeneration) status("error:" + if (t is javax.net.ssl.SSLException) "Identidade TLS do PC não confere ou certificado expirou." else "Não foi possível conectar ao PC na rede local.", gen)
+            lost(gen)
+          }
         }
       })
-    } catch (_: Exception) { status("error:Endereço ou certificado inválido."); lost(gen) }
+    } catch (_: Exception) { status("error:Endereço ou certificado inválido.", gen); lost(gen) }
   }
   @Synchronized private fun lost(gen: Int) {
     if (gen != connectionGeneration) return
     supportsInput = false
     pendingRemoteMessage = null
     socket = null
+    restorePreviousPair()
     if (requestedDisconnect) return
-    status("disconnected")
+    status("disconnected", gen)
     if (requestedDisconnect || endpoint?.token.isNullOrBlank() || !foreground) return
     val delays = intArrayOf(1, 2, 4, 8, 16, 30)
     val delay = delays[min(reconnectAttempt++, delays.lastIndex)] * 1000L + SecureRandom().nextInt(500)
-    reconnectRunnable = Runnable { reconnectRunnable = null; if (foreground && !requestedDisconnect) open(true) }
+    reconnectRunnable?.let { main.removeCallbacks(it) }
+    reconnectRunnable = Runnable {
+      synchronized(this) {
+        if (gen != connectionGeneration) return@Runnable
+        reconnectRunnable = null
+        if (socket == null && foreground && !requestedDisconnect) open(true)
+      }
+    }
     main.postDelayed(reconnectRunnable!!, delay)
   }
   @Synchronized override fun sendRequest(id: String, actionJson: String) {
@@ -339,17 +406,27 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
 
   override fun readClipboard(promise: Promise) {
     main.post {
+      if (!foreground || getCurrentActivity()?.hasWindowFocus() != true) { promise.reject("unavailable", "Abra o aplicativo para ler a área de transferência."); return@post }
       try {
-        val description = clipboard.primaryClipDescription
+        val clip = clipboard.primaryClip
+        val description = clip?.description
         if (isSensitive(description)) { promise.reject("sensitive", "Texto marcado como sensível pelo Android."); return@post }
         if (description?.hasMimeType(android.content.ClipDescription.MIMETYPE_TEXT_PLAIN) != true) { promise.reject("unsupported", "A área de transferência não contém texto simples."); return@post }
-        val text = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+        val text = clip?.getItemAt(0)?.text?.toString() ?: ""
         if (text.contains('\u0000') || text.toByteArray(Charsets.UTF_8).size > 65_536) promise.reject("too_large", "Texto inválido ou maior que 64 KiB.") else promise.resolve(text)
       } catch (_: Exception) { promise.reject("clipboard_busy", "Não foi possível ler a área de transferência.") }
     }
   }
   private fun isSensitive(description: android.content.ClipDescription?): Boolean =
     description?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
+  private fun clipboardBaseline(): String? {
+    if (!foreground || getCurrentActivity()?.hasWindowFocus() != true) return null
+    return try {
+      val clip = clipboard.primaryClip ?: return null
+      val description = clip.description
+      if (isSensitive(description) || !description.hasMimeType(android.content.ClipDescription.MIMETYPE_TEXT_PLAIN)) null else clip.getItemAt(0)?.text?.toString()
+    } catch (_: Exception) { null }
+  }
   override fun writeClipboard(text: String, promise: Promise) {
     if (text.contains('\u0000') || text.toByteArray(Charsets.UTF_8).size > 65_536) { promise.reject("too_large", "Texto inválido ou maior que 64 KiB."); return }
     main.post {
@@ -365,8 +442,9 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
     main.post {
       val wasEnabled = foregroundSync
       foregroundSync = enabled && foreground
+      if (!foregroundSync || !wasEnabled) suppressClipText = null
       if (foregroundSync && !wasEnabled) {
-        lastClipText = try { clipboard.primaryClip?.getItemAt(0)?.text?.toString() } catch (_: Exception) { null }
+        lastClipText = clipboardBaseline()
       }
     }
   }
@@ -379,19 +457,21 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
     if (!foreground || !foregroundSync || getCurrentActivity()?.hasWindowFocus() != true) return
     main.post {
       if (!foreground || !foregroundSync || getCurrentActivity()?.hasWindowFocus() != true) return@post
+      val suppressed = suppressClipText
+      suppressClipText = null
       try {
-        val description = clipboard.primaryClipDescription
-        val sensitive = isSensitive(description)
-        if (description?.hasMimeType(android.content.ClipDescription.MIMETYPE_TEXT_PLAIN) != true) return@post
-        val text = if (sensitive) "" else clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
-        if (text == suppressClipText) { suppressClipText = null; lastClipText = text; return@post }
+        val clip = clipboard.primaryClip
+        val description = clip?.description
+        if (isSensitive(description) || description?.hasMimeType(android.content.ClipDescription.MIMETYPE_TEXT_PLAIN) != true) { lastClipText = null; return@post }
+        val text = clip?.getItemAt(0)?.text?.toString() ?: ""
+        if (text == suppressed) { lastClipText = text; return@post }
         if (text == lastClipText) return@post
         lastClipText = text
         if (text.isEmpty()) return@post
         if (text.toByteArray(Charsets.UTF_8).size > 65_536 || text.contains('\u0000')) { emit("remote.feedback", "Texto copiado inválido ou maior que 64 KiB."); return@post }
-        val payload = WritableNativeMap().apply { putString("text", text); putBoolean("sensitive", sensitive) }
+        val payload = WritableNativeMap().apply { putString("text", text); putBoolean("sensitive", false) }
         emit("remote.clipboard", payload)
-      } catch (_: Exception) {}
+      } catch (_: Exception) { lastClipText = null }
     }
   }
   override fun getSharedText(promise: Promise) { val text = pendingShare ?: ""; pendingShare = null; promise.resolve(text) }
@@ -456,7 +536,7 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
   }
   @Synchronized override fun onHostResume() {
     foreground = true
-    lastClipText = try { if (clipboard.primaryClipDescription?.hasMimeType(android.content.ClipDescription.MIMETYPE_TEXT_PLAIN) == true) clipboard.primaryClip?.getItemAt(0)?.text?.toString() else null } catch (_: Exception) { null }
+    lastClipText = clipboardBaseline()
     pendingRemoteMessage?.let { emit("remote.backgroundClipboard", it); pendingRemoteMessage = null }
     reconnect()
     if (!requestedDisconnect && (endpoint ?: restore())?.token?.isNotBlank() == true) startDiscovery()

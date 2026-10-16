@@ -31,7 +31,7 @@ export class RemoteStore {
   private generation = 0;
   private lastVolumeAt = 0;
   private delayedVolume: ReturnType<typeof setTimeout> | null = null;
-  private lastAppliedText = '';
+  private sharedTextGeneration = 0;
   private lastClipboardEventRevision = -1;
   private observedClipboardRevision = 0;
   private dragGeneration = 0;
@@ -116,7 +116,6 @@ export class RemoteStore {
       if (this.eventIds.size > 256) {this.eventIds.delete(this.eventIds.values().next().value!);}
       this.patch({receivedText: msg.text});
       if (allowAutoApply && this.snapshot.foreground && this.snapshot.download && this.snapshot.autoApply && !this.snapshot.paused) {
-        this.lastAppliedText = msg.text;
         NativePCRemote.writeClipboard(msg.text).catch(() => this.patch({error: 'O Android não permitiu copiar o texto. Use a ação manual com o app em foco.'}));
       }
       return;
@@ -132,11 +131,12 @@ export class RemoteStore {
 
   private onLocalClipboard(payload: {text: string; sensitive: boolean}) {
     if (!this.snapshot.foreground || !this.snapshot.upload || this.snapshot.paused || payload.sensitive || !textIsAllowed(payload.text)) {return;}
-    if (payload.text === this.lastAppliedText) {this.lastAppliedText = ''; return;}
+    // Native suppresses notifications caused by its own clipboard writes.
     this.sendText(payload.text, true).catch(() => undefined);
   }
   private onShared(text: string) {
     if (!textIsAllowed(text)) {this.patch({error: 'Texto acima de 64 KiB ou inválido.'}); return;}
+    this.sharedTextGeneration++;
     this.patch({sharedText: text});
   }
 
@@ -165,12 +165,14 @@ export class RemoteStore {
     await this.request({kind: 'clipboard.set', eventId: NativePCRemote.createId(), origin: 'android', text, automatic, baseRevision: this.observedClipboardRevision});
   }
   async sendClipboard() {
-    const text = this.snapshot.sharedText || await NativePCRemote.readClipboard();
+    const sharedText = this.snapshot.sharedText;
+    const generation = this.sharedTextGeneration;
+    const text = sharedText || await NativePCRemote.readClipboard();
     await this.sendText(text, false);
-    this.patch({sharedText: ''});
+    if (sharedText && generation === this.sharedTextGeneration) {this.patch({sharedText: ''});}
   }
   async getClipboard() {await this.request({kind: 'clipboard.get'});}
-  async copyReceived() {if (this.snapshot.receivedText) {this.lastAppliedText = this.snapshot.receivedText; await NativePCRemote.writeClipboard(this.snapshot.receivedText);}}
+  async copyReceived() {if (this.snapshot.receivedText) {await NativePCRemote.writeClipboard(this.snapshot.receivedText);}}
   setSync(change: Partial<Pick<RemoteView, 'upload' | 'download' | 'paused' | 'autoApply'>>) {
     this.patch(change);
     this.persistPreferences();

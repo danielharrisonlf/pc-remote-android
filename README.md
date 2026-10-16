@@ -1,16 +1,17 @@
 # PC Remote Android
 
-Aplicativo Android nativo em React Native + TypeScript para controlar o PC na LAN. Este repositório é independente do `pc-remote-desktop`. Versão 0.2.0, protocolo 1. Não usa WebView, Expo Go, nuvem, login, root, ADB ou acessibilidade para operar.
+Aplicativo Android nativo em React Native + TypeScript para controlar o PC na LAN. Este repositório é independente do `pc-remote-desktop`. Versão 0.2.1, protocolo 1. Não usa WebView, Expo Go, nuvem, login, root, ADB ou acessibilidade para operar.
 
-## Baixar e instalar — versão 0.2.0
+## Baixar e instalar — versão 0.2.1
 
 | Aplicativo | Download |
 |---|---|
-| Android ARM64 — celular compatível | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.0/pc-remote-android-0.2.0-arm64-evaluation.apk) |
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.2.0/pc-remote-desktop-0.2.0-x64-setup.exe) |
-| Android x86_64 — emulador | [Baixar APK para emulador](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.0/pc-remote-android-0.2.0-x86_64-evaluation.apk) |
+| Android ARM64 — celular compatível | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.1/pc-remote-android-0.2.1-arm64-evaluation.apk) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.2.2/pc-remote-desktop-0.2.2-x64-setup.exe) |
+| Android x86_64 — emulador | [Baixar APK para emulador](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.1/pc-remote-android-0.2.1-x86_64-evaluation.apk) |
+| Android Kotlin — alternativa universal, branch native/kotlin | [Baixar APK Kotlin](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.2.4-kotlin/pc-remote-android-kotlin-0.2.4-evaluation.apk) |
 
-Os downloads estão nas Releases privadas: entre no GitHub com uma conta que tenha acesso aos dois repositórios. As páginas de [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.2.0) e [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.2.0) também incluem os hashes SHA-256.
+Os downloads estão nas Releases privadas: entre no GitHub com uma conta que tenha acesso aos dois repositórios. As páginas de [Release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.2.1) e [Release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.2.2) também incluem os hashes SHA-256.
 
 Instale o `.exe` no Windows e abra o PC Remote pela bandeja. No celular, abra o APK ARM64 pelo gerenciador de arquivos e autorize a instalação dessa fonte quando solicitado. Conecte ambos à mesma rede local, inicie o pareamento no PC, escaneie o QR ou informe os dados exibidos e confirme o pedido no Windows. Os aplicativos instalados não precisam de Metro, Expo Go ou ferramentas de desenvolvimento.
 
@@ -77,3 +78,5 @@ A ativação é descartada ao desconectar, suspender ou colocar o Android em seg
 ## Integração contínua
 
 O modelo reproduzível está em [docs/ci/github-actions.yml](docs/ci/github-actions.yml). Ele executa testes e gera artefatos de avaliação. A autenticação GitHub disponível nesta entrega não possui o escopo `workflow`, portanto o modelo não está ativo. Para ativá-lo, com uma autenticação autorizada para workflows, mova o arquivo para `.github/workflows/build.yml` e publique esse commit. Os builds e testes locais estão registrados em [docs/TESTING.md](docs/TESTING.md).
+
+A revisão de 15/10/2026 está documentada na [auditoria de segurança](docs/SECURITY-AUDIT.md) e no [relatório de bugs e regressões](docs/BUG-AUDIT-2026-10-15.md), com evidências e limites da validação.
