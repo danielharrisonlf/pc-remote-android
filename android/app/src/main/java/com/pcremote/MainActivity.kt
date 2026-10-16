@@ -1,15 +1,21 @@
 package com.pcremote
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.net.ConnectivityManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
@@ -21,10 +27,12 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.annotation.RequiresApi
 
 /** The Activity owns Views only. Connection and command state live in RemoteClient. */
 internal class MainActivity : Activity(), ScreenHost {
   private val remote: RemoteController get() = (application as RemoteApplication).client
+  private val updates: UpdateManager get() = (application as RemoteApplication).updates
   private val mainHandler = Handler(Looper.getMainLooper())
   private val qrScanner = QrScanner()
   private lateinit var prefs: UiPreferences
@@ -37,6 +45,12 @@ internal class MainActivity : Activity(), ScreenHost {
   private var resumed = false
   private var fadingOut = false
   private var unsubscribe: (() -> Unit)? = null
+  private var unsubscribeUpdates: (() -> Unit)? = null
+  private var updateSheet: UpdateSheet? = null
+  /** Sent to "Instalar apps desconhecidos"; the update continues on return. */
+  private var awaitingInstallPermission = false
+  /** Permission granted in a new process: install once the check finds the release again. */
+  private var installAfterCheck = false
   private var unregisterBack: (() -> Unit)? = null
   private var pairingSheet: Sheet? = null
   private var pairingPanel: PairingPanel? = null
@@ -48,6 +62,7 @@ internal class MainActivity : Activity(), ScreenHost {
   private lateinit var statusChip: StatusChip
   private lateinit var banner: LinearLayout
   private lateinit var bannerTitle: TextView
+  private lateinit var bannerSubtitle: TextView
   private lateinit var navBar: NavigationBar
   private lateinit var snackbar: Snackbar
   override lateinit var panels: PanelLayer
@@ -83,7 +98,9 @@ internal class MainActivity : Activity(), ScreenHost {
     super.onCreate(savedInstanceState)
     state = remote.view
     lastStatus = state.status
-    updateState = UpdateState(lookup = lastLookup, installed = Releases.installed(installedVersionName()), skipped = prefs.skippedUpdate)
+    UpdateNotice.seen(this)
+    updateState = UpdateState(lookup = lastLookup, installed = Releases.installed(installedVersionName()), skipped = prefs.skippedUpdate, flow = updates.flow)
+    awaitingInstallPermission = savedInstanceState?.getBoolean(KEY_INSTALL_PERMISSION) == true
     val restored = savedInstanceState?.getString(KEY_TAB)?.let { runCatching { Tab.valueOf(it) }.getOrNull() }
     navigation = TabNavigation(restored ?: homeTab())
     // A recreated Activity or a launch from Recents carries an old share: it was already handled.
@@ -99,6 +116,12 @@ internal class MainActivity : Activity(), ScreenHost {
         if (changed) render()
       }
     }
+    unsubscribeUpdates = updates.observe { flow, notice ->
+      updateState = updateState.copy(flow = flow)
+      render()
+      updateSheet?.render(updateState)
+      notice?.let { updateNotice(it, if (flow is UpdateFlow.Failed) Tone.DANGER else Tone.ACCENT) }
+    }
     render()
     unregisterBack = BackNavigation.register(this) { navigateBack() }
     if (savedInstanceState?.getBoolean(KEY_FADE_IN) == true) {
@@ -111,13 +134,23 @@ internal class MainActivity : Activity(), ScreenHost {
     super.onSaveInstanceState(outState)
     outState.putString(KEY_TAB, navigation.tab.name)
     outState.putBoolean(KEY_FADE_IN, fadingOut)
+    outState.putBoolean(KEY_INSTALL_PERMISSION, awaitingInstallPermission)
   }
 
   override fun onResume() {
     super.onResume()
     resumed = true
     remote.foreground(this)
+    updates.attach(this)
     restartLatency()
+    if (awaitingInstallPermission) {
+      awaitingInstallPermission = false
+      when {
+        !canInstallPackages() -> updateNotice("Sem essa autorização o app não instala a atualização. Tente de novo ou use Ver no GitHub.", Tone.DANGER)
+        updateState.release != null -> startUpdate()
+        else -> installAfterCheck = true
+      }
+    }
     val stale = System.currentTimeMillis() - prefs.lastUpdateCheck > UPDATE_INTERVAL_MS
     if (lastLookup == null || stale) checkUpdates(manual = false)
   }
@@ -132,6 +165,7 @@ internal class MainActivity : Activity(), ScreenHost {
     mainHandler.removeCallbacks(latencyTask)
     volumeInteraction.finish()
     remote.background()
+    updates.detach(this)
     super.onPause()
   }
 
@@ -141,8 +175,11 @@ internal class MainActivity : Activity(), ScreenHost {
     unregisterBack = null
     qrScanner.detach()
     pairingSheet?.dismiss()
+    updateSheet?.dismiss()
     unsubscribe?.invoke()
     unsubscribe = null
+    unsubscribeUpdates?.invoke()
+    unsubscribeUpdates = null
     super.onDestroy()
   }
 
@@ -163,6 +200,11 @@ internal class MainActivity : Activity(), ScreenHost {
     val clip = data.clipData
     val uris = if (clip != null) (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri } else listOfNotNull(data.data)
     remote.sendFiles(uris)
+  }
+
+  override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    // Granted or not, the update goes on: the notice is only a convenience.
+    if (requestCode == NOTIFY_UPDATE) startUpdate() else super.onRequestPermissionsResult(requestCode, permissions, grantResults)
   }
 
   /**
@@ -257,9 +299,10 @@ internal class MainActivity : Activity(), ScreenHost {
       isClickable = true
       setOnClickListener { openUpdate() }
       addView(kit.icon(R.drawable.ic_circle_arrow_up, p.accentText, 22), LinearLayout.LayoutParams(kit.dp(22), kit.dp(22)).apply { marginEnd = kit.dp(8) })
+      bannerSubtitle = kit.text("", TextStyle.CAPTION, p.textSecondary).apply { maxLines = 1 }
       addView(kit.column(2).apply {
         addView(bannerTitle)
-        addView(kit.text("Toque para ver as novidades.", TextStyle.CAPTION, p.textSecondary).apply { maxLines = 1 })
+        addView(bannerSubtitle)
       }, kit.weighted())
       addView(kit.iconButton(R.drawable.ic_x, "Dispensar esta versão", 44) {
         updateState.release?.let { skipUpdate(it.version.toString()) }
@@ -343,7 +386,9 @@ internal class MainActivity : Activity(), ScreenHost {
 
     val notify = updateState.notify
     banner.visibility = if (notify) View.VISIBLE else View.GONE
-    updateState.release?.let { bannerTitle.text = "Versão ${it.version} disponível" }
+    val (bannerText, bannerHint) = UpdateLabels.banner(updateState)
+    bannerTitle.text = bannerText
+    bannerSubtitle.text = bannerHint
     navBar.setBadge(Tab.CONNECTION, notify)
 
     // A finished pairing lands on the touchpad, ready to use.
@@ -438,20 +483,29 @@ internal class MainActivity : Activity(), ScreenHost {
 
   override fun openUpdate() {
     val release = updateState.release ?: return
-    UpdateSheet.show(this, release, updateState.installed)
+    updateSheet?.dismiss()
+    val sheet = UpdateSheet(this, release)
+    sheet.dialog.setOnDismissListener { if (updateSheet === sheet) updateSheet = null }
+    updateSheet = sheet
+    sheet.show()
   }
 
   override fun checkUpdates(manual: Boolean) {
     if (updateState.checking) return
     updateState = updateState.copy(checking = true)
     render()
-    releases.check { lookup ->
+    releases.check(updates.origin()) { lookup ->
       lastLookup = lookup
       runOnUiThread {
         if (isDestroyed) return@runOnUiThread
         prefs.lastUpdateCheck = System.currentTimeMillis()
         updateState = updateState.copy(checking = false, lookup = lookup)
         render()
+        if (installAfterCheck) {
+          installAfterCheck = false
+          if (updateState.available) { startUpdate(); return@runOnUiThread }
+        }
+        autoDownload()
         if (!manual) return@runOnUiThread
         when {
           lookup is ReleaseLookup.Unavailable -> snackbar.show(lookup.message, Tone.DANGER)
@@ -475,13 +529,83 @@ internal class MainActivity : Activity(), ScreenHost {
 
   override fun skipUpdate(version: String) {
     prefs.skippedUpdate = version
+    updates.keep()
     updateState = updateState.copy(skipped = version)
     render()
+  }
+
+  override val autoDownload: Boolean get() = prefs.autoDownloadUpdates
+
+  override fun setAutoDownload(enabled: Boolean) {
+    prefs.autoDownloadUpdates = enabled
+    render()
+    autoDownload()
+  }
+
+  /** On unmetered networks a version on offer is downloaded and verified ahead; installing still takes a tap. */
+  private fun autoDownload() {
+    val release = updateState.release ?: return
+    if (!prefs.autoDownloadUpdates || !updateState.notify || !updateState.inApp) return
+    if (updateState.flow !is UpdateFlow.Idle && updateState.flow !is UpdateFlow.Failed) return
+    val connectivity = getSystemService(ConnectivityManager::class.java) ?: return
+    if (connectivity.isActiveNetworkMetered) return
+    updates.start(release, install = false)
+  }
+
+  /** The tap on "Atualizar agora" or "Instalar agora"; nothing installs without it. */
+  override fun startUpdate() {
+    val release = updateState.release ?: return
+    if (!updateState.available) return
+    if (!updateState.inApp) { openReleasePage(release.pageUrl); return }
+    // Android 13+: asked once, so a notice can confirm the update after the app closes.
+    if (Build.VERSION.SDK_INT >= 33 && !prefs.askedUpdateNotice && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+      prefs.askedUpdateNotice = true
+      requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFY_UPDATE)
+      return
+    }
+    if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) { explainInstallPermission(); return }
+    updates.start(release, install = true)
+  }
+
+  private fun canInstallPackages() = Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls()
+
+  @RequiresApi(26)
+  private fun explainInstallPermission() {
+    AlertDialog.Builder(this, dialogTheme(kit.palette))
+      .setTitle("Permitir que o PC Remote instale atualizações")
+      .setMessage("O Android pede essa autorização uma vez. Na próxima tela, ative \"Permitir desta fonte\" e volte: a atualização continua sozinha.")
+      .setNegativeButton("Agora não", null)
+      .setPositiveButton("Abrir ajustes") { _, _ ->
+        try {
+          startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+          awaitingInstallPermission = true
+        } catch (_: ActivityNotFoundException) {
+          updateNotice("Abra Ajustes → Apps → PC Remote → Instalar apps desconhecidos.", Tone.DANGER)
+        }
+      }
+      .show()
+  }
+
+  /** In the update sheet while it is open (it covers the snackbar), otherwise a snackbar. */
+  private fun updateNotice(text: String, tone: Tone) {
+    val sheet = updateSheet
+    if (sheet != null && sheet.showing) sheet.notice(text, tone == Tone.DANGER) else snackbar.show(text, tone)
+  }
+
+  override fun openReleasePage(url: String) {
+    if (!url.startsWith("https://github.com/")) return
+    try {
+      startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    } catch (_: ActivityNotFoundException) {
+      updateNotice("Nenhum navegador disponível para abrir o GitHub.", Tone.DANGER)
+    }
   }
 
   private companion object {
     const val KEY_TAB = "tab"
     const val KEY_FADE_IN = "fadeIn"
+    const val KEY_INSTALL_PERMISSION = "installPermission"
+    const val NOTIFY_UPDATE = 42
     const val PICK_FILES = 41
     const val LATENCY_INTERVAL_MS = 5000L
     const val UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000L

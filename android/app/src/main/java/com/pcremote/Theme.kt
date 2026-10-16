@@ -66,4 +66,19 @@ internal class UiPreferences(context: Context) {
   var lastUpdateCheck: Long
     get() = prefs.getLong("lastUpdateCheck", 0L)
     set(value) = prefs.edit().putLong("lastUpdateCheck", value).apply()
+
+  /** Downloads and verifies new versions on unmetered networks; installing still takes a tap. */
+  var autoDownloadUpdates: Boolean
+    get() = prefs.getBoolean("autoDownloadUpdates", true)
+    set(value) = prefs.edit().putBoolean("autoDownloadUpdates", value).apply()
+
+  /** Android 13+ notification permission was asked once before an update. */
+  var askedUpdateNotice: Boolean
+    get() = prefs.getBoolean("askedUpdateNotice", false)
+    set(value) = prefs.edit().putBoolean("askedUpdateNotice", value).apply()
+
+  /** versionCode that last ran, so a reinstall of the same build does not announce an update. */
+  var lastVersionCode: Long
+    get() = prefs.getLong("lastVersionCode", 0L)
+    set(value) = prefs.edit().putLong("lastVersionCode", value).apply()
 }

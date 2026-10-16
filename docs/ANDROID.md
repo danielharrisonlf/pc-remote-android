@@ -27,11 +27,15 @@ RemoteClient usa OkHttp 4.12.0 e trust manager exclusivo da conexão: SHA-256 do
 
 NsdManager descobre _pcremote._tcp. INTERNET, ACCESS_NETWORK_STATE, ACCESS_WIFI_STATE e CHANGE_WIFI_MULTICAST_STATE atendem LAN/descoberta. Target 36: antes de elevar para 37, implementar ACCESS_LOCAL_NETWORK contextual ou seletor do sistema. Firewall Windows deve permitir servidor somente nas redes desejadas, normalmente privadas; sem configuração de roteador.
 
-QR usa Google Play Services Code Scanner 16.1.0; módulo pode ser baixado externamente. Sem Play Services, o pareamento por código continua disponível. POST_NOTIFICATIONS é solicitado contextual no Android 13+ ao habilitar PC→celular; recusar não impede uso em foco.
+QR usa Google Play Services Code Scanner 16.1.0; módulo pode ser baixado externamente. Sem Play Services, o pareamento por código continua disponível. POST_NOTIFICATIONS é solicitado contextual no Android 13+ ao habilitar PC→celular e, uma vez, antes da primeira atualização dentro do app; recusar não impede uso em foco. REQUEST_INSTALL_PACKAGES e UPDATE_PACKAGES_WITHOUT_USER_ACTION servem só para o app instalar as próprias atualizações.
 
 ## Atualizações
 
-ReleaseChecker lê `https://api.github.com/repos/danielharrisonlf/pc-remote-android/releases?per_page=30` com OkHttp, sem token. Aceita só tags `vX.Y.Z-kotlin` publicadas e links em github.com; rascunhos ficam de fora. Compara com o versionName instalado e escolhe o APK que não seja `unminified`. O download abre no navegador; o Android pede autorização para instalar e preserva pareamento e preferências quando a assinatura é a mesma. Sem conexão ou com limite da API, a aba Conexão mostra o motivo.
+ReleaseChecker lê `https://api.github.com/repos/danielharrisonlf/pc-remote-android/releases?per_page=30` com OkHttp, sem token. Aceita só tags `vX.Y.Z-kotlin` publicadas e arquivos em `github.com/danielharrisonlf/pc-remote-android/releases/download/`; rascunhos ficam de fora. Compara com o versionName instalado e escolhe o APK que não seja `unminified` e o `KOTLIN-SHA256SUMS-<versão>.txt` da mesma release. Sem conexão ou com limite da API, a aba Conexão mostra o motivo.
+
+Desde a 0.5.0 o UpdateManager baixa o APK para `cacheDir/updates`, confere SHA-256, pacote, versionCode e certificado, e instala por uma sessão do PackageInstaller depois de um toque em Atualizar agora ou Instalar agora. Com **Baixar atualizações automaticamente** (padrão) e rede sem limite, o download e a verificação acontecem antes, com o app aberto. Na primeira vez o Android pede **Instalar apps desconhecidos** para o PC Remote; no Android 12+ as atualizações seguintes, e nos testes já a primeira, instalam sem confirmação do sistema. O receiver de MY_PACKAGE_REPLACED avisa "PC Remote atualizado para X". Detalhes em [ARCHITECTURE.md](ARCHITECTURE.md) e na [auditoria](SECURITY-AUDIT.md).
+
+Teste com servidor próprio, só em build debug: grave a URL da lista de releases com `adb shell "echo http://10.0.2.2:8765/releases.json | run-as com.pcremote.nativeandroid sh -c 'mkdir -p files && cat > files/debug-releases-url.txt'"`. A build debug aceita HTTP apenas para 10.0.2.2; o release ignora o arquivo. Apague-o para voltar ao GitHub.
 
 ## Clipboard e ciclo de vida
 
