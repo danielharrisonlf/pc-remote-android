@@ -48,7 +48,7 @@ export function textIsAllowed(value: string): boolean {
   return !value.includes('\0') && utf8Size(value) <= MAX_TEXT_BYTES;
 }
 
-function utf8Size(value: string): number {
+export function utf8Size(value: string): number {
   let size = 0;
   for (let i = 0; i < value.length; i++) {
     const cp = value.codePointAt(i)!;

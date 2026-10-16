@@ -1,9 +1,19 @@
-import {AppState, NativeEventEmitter} from 'react-native';
+import {AppState, NativeEventEmitter, Platform} from 'react-native';
 import NativePCRemote from '../integrations/NativePCRemote';
+import {deviceDisplayName} from '../domain/device';
 import {inputTextIsAllowed, parseIncoming, textIsAllowed, type Action, type Session, type State} from '../domain/protocol';
 import {InputMotion} from './InputMotion';
+import {ScrollMotion} from './ScrollMotion';
+
+export type ThemePreference = 'system' | 'light' | 'dark';
+const themes: ThemePreference[] = ['system', 'light', 'dark'];
 
 export type RemoteView = {
+  /** True once the saved computer and preferences were read from native storage. */
+  ready: boolean;
+  theme: ThemePreference;
+  /** Release version the user chose to ignore in the update banner. */
+  skippedUpdate: string;
   status: 'desconectado' | 'conectando' | 'pareando' | 'aguardando aprovação' | 'conectado' | 'reconectando';
   pcName: string;
   error: string;
@@ -39,8 +49,9 @@ export class RemoteStore {
   private alive = false;
   private inputGeneration = 0;
   private inputDiscretePending = false;
-  snapshot: RemoteView = {status: 'desconectado', pcName: '', error: '', state: null, selectedSessionId: '', receivedText: '', sharedText: '', upload: false, download: false, paused: false, autoApply: false, haptics: true, foreground: true, draggingVolume: null, inputFeature: false, inputArmed: false, inputActivating: false};
+  snapshot: RemoteView = {ready: false, theme: 'system', skippedUpdate: '', status: 'desconectado', pcName: '', error: '', state: null, selectedSessionId: '', receivedText: '', sharedText: '', upload: false, download: false, paused: false, autoApply: false, haptics: true, foreground: true, draggingVolume: null, inputFeature: false, inputArmed: false, inputActivating: false};
   private motion = new InputMotion(action => this.request(action), () => this.canSendInput(), error => this.patch({error: error.message}));
+  private scrollMotion = new ScrollMotion(steps => this.request({kind: 'pointer.scroll', steps}), () => this.canSendInput(), error => this.patch({error: error.message}));
 
   subscribe = (listener: Listener) => {this.listeners.add(listener); return () => {this.listeners.delete(listener);};};
   getSnapshot = () => this.snapshot;
@@ -64,12 +75,16 @@ export class RemoteStore {
       if (foreground) {this.dropInput(); NativePCRemote.acknowledgeInputResume(); NativePCRemote.reconnect();}
     });
     NativePCRemote.getPreferences().then(raw => {
-      const value = JSON.parse(raw) as Partial<Pick<RemoteView, 'upload' | 'download' | 'paused' | 'autoApply' | 'haptics'>>;
-      this.patch({upload: !!value.upload, download: !!value.download, paused: !!value.paused, autoApply: !!value.autoApply, haptics: value.haptics !== false});
+      const value = JSON.parse(raw) as Partial<Pick<RemoteView, 'upload' | 'download' | 'paused' | 'autoApply' | 'haptics' | 'theme' | 'skippedUpdate'>>;
+      this.patch({
+        upload: !!value.upload, download: !!value.download, paused: !!value.paused, autoApply: !!value.autoApply, haptics: value.haptics !== false,
+        theme: themes.includes(value.theme as ThemePreference) ? value.theme! : 'system',
+        skippedUpdate: typeof value.skippedUpdate === 'string' ? value.skippedUpdate : '',
+      });
       NativePCRemote.setForegroundSync(this.snapshot.foreground && this.snapshot.upload && !this.snapshot.paused);
     }).catch(() => undefined).finally(() => NativePCRemote.getSavedComputer().then(raw => {
       if (raw) {const saved = JSON.parse(raw) as {pcName?: string}; this.patch({pcName: saved.pcName ?? ''}); NativePCRemote.reconnect();}
-    }).catch(() => undefined));
+    }).catch(() => undefined).finally(() => this.patch({ready: true})));
     NativePCRemote.getSharedText().then(text => {if (text) {this.onShared(text);}}).catch(() => undefined);
     NativePCRemote.getPendingRemoteMessage().then(text => {if (text) {this.onMessage(text, false);}}).catch(() => undefined);
     NativePCRemote.getPendingFeedback().then(text => {if (text) {this.patch({error: text});}}).catch(() => undefined);
@@ -144,7 +159,9 @@ export class RemoteStore {
     this.dropInput();
     this.rejectPending();
     this.patch({status: 'pareando', error: '', state: null, receivedText: '', draggingVolume: null});
-    NativePCRemote.connect(host.trim(), port, fingerprint.trim().toLowerCase().replaceAll(':', ''), code.trim(), 'Celular Android');
+    // The PC shows this name in its approval prompt, so send the real model.
+    const name = Platform.OS === 'android' ? deviceDisplayName(Platform.constants as {Brand?: string; Manufacturer?: string; Model?: string}) : 'Celular Android';
+    NativePCRemote.connect(host.trim(), port, fingerprint.trim().toLowerCase().replaceAll(':', ''), code.trim(), name);
   }
   disconnect() {this.dropInput(); NativePCRemote.disconnect(); this.rejectPending(); this.patch({status: 'desconectado', state: null, receivedText: '', draggingVolume: null});}
   forget() {this.disconnect(); NativePCRemote.forgetComputer(); this.patch({pcName: '', receivedText: ''});}
@@ -173,6 +190,15 @@ export class RemoteStore {
   }
   async getClipboard() {await this.request({kind: 'clipboard.get'});}
   async copyReceived() {if (this.snapshot.receivedText) {await NativePCRemote.writeClipboard(this.snapshot.receivedText);}}
+  clearError() {if (this.snapshot.error) {this.patch({error: ''});}}
+  /** Forgets the received text on this phone only; the PC clipboard is untouched. */
+  clearReceived() {this.patch({receivedText: ''});}
+  /** Round trip of a state read, used as the latency estimate. */
+  async ping(): Promise<number> {
+    const started = Date.now();
+    await this.request({kind: 'state.get'});
+    return Date.now() - started;
+  }
   setSync(change: Partial<Pick<RemoteView, 'upload' | 'download' | 'paused' | 'autoApply'>>) {
     this.patch(change);
     this.persistPreferences();
@@ -180,14 +206,16 @@ export class RemoteStore {
     this.sendSync();
   }
   setHaptics(enabled: boolean) {this.patch({haptics: enabled}); this.persistPreferences();}
-  private persistPreferences() {const {upload, download, paused, autoApply, haptics} = this.snapshot; NativePCRemote.savePreferences(JSON.stringify({upload, download, paused, autoApply, haptics}));}
+  setTheme(theme: ThemePreference) {this.patch({theme}); this.persistPreferences();}
+  skipUpdate(version: string) {this.patch({skippedUpdate: version}); this.persistPreferences();}
+  private persistPreferences() {const {upload, download, paused, autoApply, haptics, theme, skippedUpdate} = this.snapshot; NativePCRemote.savePreferences(JSON.stringify({upload, download, paused, autoApply, haptics, theme, skippedUpdate}));}
   private sendSync() {if (this.snapshot.status === 'conectado') {const {upload, download, paused} = this.snapshot; this.request({kind: 'sync.set', upload, download, paused}).catch(() => undefined);}}
 
   private canSendInput() {
     const {status, foreground, inputFeature, inputArmed, state} = this.snapshot;
     return status === 'conectado' && foreground && inputFeature && inputArmed && state?.input?.allowed === true && state.input.enabled === true;
   }
-  private dropInput() {this.inputGeneration++; this.inputDiscretePending = false; this.motion.cancel(); if (this.snapshot.inputArmed || this.snapshot.inputActivating) {this.patch({inputArmed: false, inputActivating: false});}}
+  private dropInput() {this.inputGeneration++; this.inputDiscretePending = false; this.motion.cancel(); this.scrollMotion.cancel(); if (this.snapshot.inputArmed || this.snapshot.inputActivating) {this.patch({inputArmed: false, inputActivating: false});}}
   disableInput() {
     const wasArmed = this.snapshot.inputArmed || this.snapshot.inputActivating;
     this.dropInput();
@@ -207,6 +235,10 @@ export class RemoteStore {
   }
   movePointer(dx: number, dy: number) {this.motion.move(dx, dy);}
   cancelPointerMotion() {this.motion.cancel();}
+  /** Wheel steps from drag gestures; positive scrolls up, like the protocol. */
+  scroll(steps: number) {this.scrollMotion.add(steps);}
+  cancelScroll() {this.scrollMotion.cancel();}
+  get inputReady() {return this.canSendInput();}
   async inputAction(action: Extract<Action, {kind: 'pointer.click' | 'pointer.scroll' | 'keyboard.key' | 'keyboard.text'}>) {
     if (!this.canSendInput()) {throw new Error('Ative o controle de entrada no PC e no celular.');}
     if (this.inputDiscretePending) {throw new Error('Aguarde a confirmação do controle anterior.');}

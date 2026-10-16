@@ -1,1 +1,1 @@
-export {default} from './src/screens/ControlScreen';
+export {default} from './src/AppShell';

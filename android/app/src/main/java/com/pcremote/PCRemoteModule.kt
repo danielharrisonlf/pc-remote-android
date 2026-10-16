@@ -141,14 +141,18 @@ class PCRemoteModule(private val context: ReactApplicationContext) : NativePCRem
   override fun getPreferences(promise: Promise) {
     promise.resolve(JSONObject().put("upload", prefs.getBoolean("upload", false))
       .put("download", prefs.getBoolean("download", false)).put("paused", prefs.getBoolean("paused", false))
-      .put("autoApply", prefs.getBoolean("autoApply", false)).put("haptics", prefs.getBoolean("haptics", true)).toString())
+      .put("autoApply", prefs.getBoolean("autoApply", false)).put("haptics", prefs.getBoolean("haptics", true))
+      .put("theme", prefs.getString("theme", "system")).put("skippedUpdate", prefs.getString("skippedUpdate", "")).toString())
   }
   override fun savePreferences(json: String) {
     try {
       val value = JSONObject(json)
+      // Display-only preferences: unknown themes fall back to the system setting.
+      val theme = value.optString("theme", "system").takeIf { it in setOf("system", "light", "dark") } ?: "system"
+      val skippedUpdate = value.optString("skippedUpdate", "").take(64)
       prefs.edit().putBoolean("upload", value.getBoolean("upload")).putBoolean("download", value.getBoolean("download"))
         .putBoolean("paused", value.getBoolean("paused")).putBoolean("autoApply", value.getBoolean("autoApply"))
-        .putBoolean("haptics", value.getBoolean("haptics")).apply()
+        .putBoolean("haptics", value.getBoolean("haptics")).putString("theme", theme).putString("skippedUpdate", skippedUpdate).apply()
     } catch (_: Exception) {}
   }
   @Synchronized override fun forgetComputer() {
