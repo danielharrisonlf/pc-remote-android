@@ -6,13 +6,15 @@ Android e Windows são repositórios independentes. Protocolo 1 com as extensõe
 |---|---|
 | RemoteApplication.kt | Singleton fora do ciclo de vida das telas |
 | Models.kt | DTOs, estado, ações tipadas e RemoteController |
-| MainActivity.kt | Casca: barra superior, abas, aviso de atualização, insets, tema e ciclo de vida |
+| MainActivity.kt | Casca: barra superior, abas, aviso de atualização e permissões da instalação, insets, tema e ciclo de vida |
 | Theme.kt / UiKit.kt | Paleta clara/escura com os papéis de cor do desktop e fábrica de Views |
 | Shell.kt | Abas, barra de navegação, snackbar, folhas em Dialog e painéis na própria janela |
 | TouchpadScreen.kt / MediaScreen.kt / ClipboardScreen.kt / ConnectionScreen.kt | Uma tela por aba |
 | TouchPadView.kt | Gestos nativos com aceleração, rolagem com dois dedos e faixa de rolagem |
 | ScrollMotion.kt | Rolagem em lotes, um pedido em voo |
-| Releases.kt / ReleaseNotes.kt | Consulta ao GitHub Releases e notas em Markdown simples |
+| Releases.kt / ReleaseNotes.kt | Consulta ao GitHub Releases (APK e SHA256SUMS de cada release) e notas em Markdown simples |
+| UpdateRules.kt | Regras puras da atualização: origem e redirecionamentos permitidos, SHA256SUMS, identidade do APK, estados e textos |
+| Updater.kt | UpdateManager (download, verificação, sessão do PackageInstaller), receivers do resultado e de MY_PACKAGE_REPLACED, aviso de atualizado |
 | Fingerprint.kt | Faixa de cores e blocos da identidade, iguais aos do desktop |
 | RemoteClient.kt | WSS/pinning, autenticação, reconexão, ACK/timeouts, NSD, clipboard, share e avisos |
 | InputIntent.kt | Intenção de manter o touchpad ligado na conexão: pausa e rearme em foco |
@@ -39,3 +41,9 @@ Clipboard sem histórico, duas direções opt-in e pausa. Android observa/aplica
 Novas ações requerem tipo, validação, capacidade, autorização e integração Rust própria. Sem endpoint shell. Outros tipos de arquivo exigiriam mudar o contrato files.v1. Touchpad/teclado explícitos operam na janela em foco; não são fallback universal de mídia. Veja PROTOCOL.md, INPUT.md e MEDIA-COMPATIBILITY.md.
 
 Pareamento mantém a credencial candidata apenas em RAM até receber Welcome válido. Só após gravar a credencial cifrada com sucesso o cliente marca a conexão autenticada. Falha ou cancelamento preserva o PC anterior. Falhas de commit que também alterem o cache do SharedPreferences não permitem recuperar a credencial candidata. Callbacks do socket encerrado são invalidados antes da reconexão; a perda de uma rede antiga não derruba a nova conexão.
+
+Atualizações (0.5.0): ReleaseChecker lê a lista de releases e o UpdateManager, criado pelo RemoteApplication, trabalha enquanto o processo existir, sem serviço. Uma thread baixa com OkHttp, sem reaproveitar conexões, e segue redirecionamentos à mão: o primeiro endereço precisa ser um arquivo em `https://github.com/danielharrisonlf/pc-remote-android/releases/download/` e cada salto, HTTPS em github.com, objects.githubusercontent.com ou release-assets.githubusercontent.com, conferido antes de conectar. Limites de 50 MB para o APK e 64 KiB para o SHA256SUMS; o arquivo fica em `cacheDir/updates/<versão>.apk`, e versões já instaladas ou downloads parciais são apagados ao iniciar e depois da atualização. Uma queda de conexão tem uma nova tentativa; verificação recusada, nunca.
+
+Verificação, repetida antes de abrir a sessão: SHA-256 igual à linha do APK no `KOTLIN-SHA256SUMS-<versão>.txt` da mesma release; `getPackageArchiveInfo` com o mesmo pacote, versionCode maior e os mesmos certificados do app instalado (GET_SIGNING_CERTIFICATES no Android 9+, GET_SIGNATURES antes). Instalação: sessão `MODE_FULL_INSTALL` do PackageInstaller com `setAppPackageName` e, no Android 12+, `USER_ACTION_NOT_REQUIRED`, que exige a permissão normal UPDATE_PACKAGES_WITHOUT_USER_ACTION. O commit usa PendingIntent explícito, mutável no Android 12+ porque o sistema preenche o status, para o UpdateInstallReceiver não exportado. `STATUS_PENDING_USER_ACTION` abre a confirmação do sistema só com a Activity em primeiro plano; senão ela espera o próximo onResume. A instalação encerra o processo; o UpdatedReceiver (MY_PACKAGE_REPLACED, também não exportado) limpa o cache e publica o aviso quando o versionCode subiu.
+
+Estados em UpdateFlow (Idle, Downloading, Verifying, Ready, Installing, Failed) com transições puras em UpdateFlows: o download automático para em Ready; só o toque em Atualizar agora ou Instalar agora leva a Installing. Na build debug, e só nela (FLAG_DEBUGGABLE), `files/debug-releases-url.txt` troca a origem por um servidor de teste, e `src/debug` libera HTTP apenas para 10.0.2.2.

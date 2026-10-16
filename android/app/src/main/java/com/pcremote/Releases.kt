@@ -24,6 +24,8 @@ internal data class Release(
   val publishedAt: String?,
   val pageUrl: String,
   val apk: ReleaseAsset?,
+  /** `KOTLIN-SHA256SUMS-<version>.txt` of the same release; without it the app does not install. */
+  val sums: ReleaseAsset? = null,
 )
 
 internal sealed interface ReleaseLookup {
@@ -54,7 +56,10 @@ internal object Releases {
     return apks.firstOrNull { it.name.contains("kotlin", ignoreCase = true) } ?: apks.firstOrNull()
   }
 
-  fun parse(json: String): List<Release> {
+  fun pickSums(assets: List<ReleaseAsset>, version: AppVersion): ReleaseAsset? = assets.firstOrNull { it.name == "KOTLIN-SHA256SUMS-$version.txt" }
+
+  /** Assets outside [origin] (in production, this repository's release downloads) are dropped. */
+  fun parse(json: String, origin: UpdateOrigin = UpdateOrigin.GITHUB): List<Release> {
     val array = JSONArray(json)
     return (0 until array.length()).mapNotNull { index ->
       val item = array.optJSONObject(index) ?: return@mapNotNull null
@@ -68,7 +73,7 @@ internal object Releases {
           val asset = list.optJSONObject(i) ?: return@mapNotNull null
           val url = asset.optString("browser_download_url")
           val name = asset.optString("name")
-          if (name.isEmpty() || !url.startsWith("https://github.com/")) null else ReleaseAsset(name, asset.optLong("size", 0L), url)
+          if (name.isEmpty() || !origin.allowsAsset(url)) null else ReleaseAsset(name, asset.optLong("size", 0L), url)
         }
       }.orEmpty()
       Release(
@@ -79,6 +84,7 @@ internal object Releases {
         publishedAt = item.optString("published_at").ifBlank { null },
         pageUrl = page,
         apk = pickApk(assets),
+        sums = pickSums(assets, version),
       )
     }
   }
@@ -92,10 +98,10 @@ internal object Releases {
 internal class ReleaseChecker(private val http: OkHttpClient = OkHttpClient.Builder().callTimeout(15, TimeUnit.SECONDS).build()) {
   private var inFlight: Call? = null
 
-  fun check(completion: (ReleaseLookup) -> Unit) {
+  fun check(origin: UpdateOrigin, completion: (ReleaseLookup) -> Unit) {
     if (inFlight != null) return
     val request = Request.Builder()
-      .url("https://api.github.com/repos/${Releases.REPOSITORY}/releases?per_page=30")
+      .url(origin.releasesUrl)
       .header("Accept", "application/vnd.github+json")
       .build()
     val call = http.newCall(request)
@@ -114,7 +120,7 @@ internal class ReleaseChecker(private val http: OkHttpClient = OkHttpClient.Buil
             it.code == 404 -> ReleaseLookup.Unavailable("Nenhuma versão publicada encontrada.")
             !it.isSuccessful -> ReleaseLookup.Unavailable("O GitHub respondeu com o código ${it.code}.")
             else -> try {
-              Releases.newest(Releases.parse(it.body?.string().orEmpty()))?.let(ReleaseLookup::Found) ?: ReleaseLookup.None
+              Releases.newest(Releases.parse(it.body?.string().orEmpty(), origin))?.let(ReleaseLookup::Found) ?: ReleaseLookup.None
             } catch (_: Exception) {
               ReleaseLookup.Unavailable("Resposta inválida do GitHub.")
             }

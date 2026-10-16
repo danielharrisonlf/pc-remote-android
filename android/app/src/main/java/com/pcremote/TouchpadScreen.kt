@@ -19,11 +19,16 @@ internal data class UpdateState(
   val lookup: ReleaseLookup? = null,
   val installed: AppVersion? = null,
   val skipped: String = "",
+  val flow: UpdateFlow = UpdateFlow.Idle,
 ) {
   val release: Release? get() = (lookup as? ReleaseLookup.Found)?.release
   val available: Boolean get() = release?.let { Releases.isNewer(it, installed) } == true
   /** Newer and not dismissed with "Agora não". */
   val notify: Boolean get() = available && release?.version?.toString() != skipped
+  /** APK and SHA256SUMS published: the app downloads, verifies and installs by itself. */
+  val inApp: Boolean get() = release?.let { it.apk != null && it.sums != null } == true
+  /** The offered version is downloaded and verified. */
+  val ready: Boolean get() = available && flow is UpdateFlow.Ready && flow.version == release?.version
 }
 
 /** What every tab needs from the Activity. */
@@ -46,6 +51,11 @@ internal interface ScreenHost {
   fun openPairingSheet()
   fun openUpdate()
   fun checkUpdates(manual: Boolean)
+  /** "Atualizar agora" / "Instalar agora": always a user's tap. */
+  fun startUpdate()
+  val autoDownload: Boolean
+  fun setAutoDownload(enabled: Boolean)
+  fun openReleasePage(url: String)
   fun setTheme(mode: ThemeMode)
   fun skipUpdate(version: String)
 }

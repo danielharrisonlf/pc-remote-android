@@ -40,11 +40,35 @@ class ReleasesTest {
     assertNull(Releases.pickApk(assets.take(2)))
   }
 
-  @Test fun assetsOutsideGitHubAreIgnored() {
+  @Test fun assetsOutsideThisRepositoryAreIgnored() {
     val assets = """[{"name":"app.apk","size":1,"browser_download_url":"https://example.com/app.apk"}]"""
     assertNull(Releases.parse(list(release("v0.3.0-kotlin", assets))).single().apk)
-    val github = """[{"name":"app.apk","size":5,"browser_download_url":"https://github.com/x/app.apk"}]"""
-    assertEquals(ReleaseAsset("app.apk", 5, "https://github.com/x/app.apk"), Releases.parse(list(release("v0.3.0-kotlin", github))).single().apk)
+    val otherRepo = """[{"name":"app.apk","size":5,"browser_download_url":"https://github.com/x/app.apk"}]"""
+    assertNull(Releases.parse(list(release("v0.3.0-kotlin", otherRepo))).single().apk)
+    val url = "https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.3.0-kotlin/app.apk"
+    val github = """[{"name":"app.apk","size":5,"browser_download_url":"$url"}]"""
+    assertEquals(ReleaseAsset("app.apk", 5, url), Releases.parse(list(release("v0.3.0-kotlin", github))).single().apk)
+  }
+
+  @Test fun picksTheSumsFileOfTheSameVersion() {
+    val base = "https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.5.0-kotlin/"
+    val assets = listOf("pc-remote-android-kotlin-0.5.0-evaluation.apk", "pc-remote-android-kotlin-0.5.0-unminified-evaluation.apk",
+      "KOTLIN-SHA256SUMS-0.4.0.txt", "KOTLIN-SHA256SUMS-0.5.0.txt", "KOTLIN-SIZE-0.5.0.md")
+      .joinToString(",", "[", "]") { """{"name":"$it","size":10,"browser_download_url":"$base$it"}""" }
+    val parsed = Releases.parse(list(release("v0.5.0-kotlin", assets))).single()
+    assertEquals("pc-remote-android-kotlin-0.5.0-evaluation.apk", parsed.apk?.name)
+    assertEquals("KOTLIN-SHA256SUMS-0.5.0.txt", parsed.sums?.name)
+    val state = UpdateState(lookup = ReleaseLookup.Found(parsed), installed = AppVersion(0, 4, 0))
+    assertTrue(state.inApp)
+    assertFalse(state.copy(lookup = ReleaseLookup.Found(parsed.copy(sums = null))).inApp)
+  }
+
+  @Test fun debugOriginAcceptsOnlyItsOwnServer() {
+    val origin = UpdateOrigin.debug("# test\nhttp://10.0.2.2:8765/releases.json\n")!!
+    val url = "http://10.0.2.2:8765/danielharrisonlf/pc-remote-android/releases/download/v0.5.1-kotlin/app.apk"
+    val assets = """[{"name":"app.apk","size":5,"browser_download_url":"$url"}]"""
+    assertEquals(url, Releases.parse(list(release("v0.5.1-kotlin", assets)), origin).single().apk?.url)
+    assertNull(Releases.parse(list(release("v0.5.1-kotlin", assets))).single().apk)
   }
 
   @Test fun installedVersionAcceptsTheKotlinSuffix() {

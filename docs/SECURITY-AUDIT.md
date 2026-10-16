@@ -8,6 +8,18 @@ Rustls foi atualizado de 0.23.45 para **0.23.46**, com alteração restrita no C
 
 Os casos envolvem depuração de sessões TLS de cliente, ECH, descompressão Brotli opcional e cache de cliente pós-quântico. O produto usa servidor TLS sem autenticação de certificado de cliente; o ClientConfig é de teste e a funcionalidade Brotli não está habilitada. Mesmo assim, o componente foi corrigido. Consulta oficial OSV dirigida a rustls 0.23.46 retornou zero avisos na data da revisão.
 
+## Atualização dentro do app — Android 0.5.0, 16/10/2026
+
+Cadeia de verificação antes de qualquer instalação:
+
+1. **Origem fixa por TLS.** A lista vem de `api.github.com/repos/danielharrisonlf/pc-remote-android/releases`. O APK e o `KOTLIN-SHA256SUMS-<versão>.txt` só são aceitos sob `https://github.com/danielharrisonlf/pc-remote-android/releases/download/`, sem query, escapes ou `..`. Cada redirecionamento é conferido antes de conectar: só HTTPS para github.com, objects.githubusercontent.com ou release-assets.githubusercontent.com. Limites de 50 MB e 64 KiB.
+2. **SHA-256.** O APK precisa ter o hash da sua linha no SHA256SUMS da mesma release; nome ausente ou listado com dois hashes é recusado. Isso protege contra arquivo corrompido ou trocado no caminho, não contra uma release maliciosa publicada com a conta do GitHub, porque os dois arquivos vêm da mesma origem.
+3. **Mesma assinatura, aplicada duas vezes.** O app exige pacote igual, versionCode maior e os mesmos certificados do app instalado (`getPackageArchiveInfo`), e repete a conferência antes de abrir a sessão. O Android recusa de novo qualquer atualização com outro certificado. É essa etapa que protege contra uma release maliciosa, enquanto a chave de assinatura estiver segura.
+
+Instalação só pelo PackageInstaller, com `setAppPackageName` do próprio app e sempre depois de um toque do usuário; o download automático para em "pronta". Os dois receivers não são exportados; o PendingIntent da sessão é explícito; a confirmação do sistema é aberta sem repassar permissões de URI. REQUEST_INSTALL_PACKAGES e UPDATE_PACKAGES_WITHOUT_USER_ACTION servem só a essa sessão. O gancho de teste (`files/debug-releases-url.txt` e HTTP para 10.0.2.2) existe apenas em build debuggable: o manifesto mesclado do release não tem `networkSecurityConfig` nem `debuggable`, e `run-as` não funciona no release.
+
+Testado no emulador contra um servidor falso: SHA-256 divergente, APK com outra assinatura, versionCode igual e redirecionamento para outro host foram recusados, sem instalar e com o arquivo apagado. Riscos residuais: os APKs continuam assinados com a chave debug de avaliação, então quem obtiver essa chave e publicar na conta do GitHub consegue entregar uma atualização; a conta do GitHub e o keystore são as raízes de confiança. Assinatura de produção continua pendente.
+
 ## Resultados e pendências
 
 | Consulta | Resultado | Tratamento |
