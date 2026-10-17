@@ -2,6 +2,41 @@
 
 Registro da alternativa 0.2.0-kotlin em 14/10/2026. Os resultados React Native da branch main não são apresentados como testes desta implementação. Integrações reais: Android SDK/Keystore/OkHttp e Windows Rust/Core Audio/GSMTC/clipboard/SendInput. Não há simulações no produto.
 
+## Atualização 0.6.1-kotlin — vários PCs, mídia fora do app, energia do PC e imagens na área de transferência, 16/10/2026
+
+### Testes automatizados
+
+- `testDebugUnitTest assembleDebug lintDebug`: sucesso. **137 testes JUnit passaram**, sem falhas. Lint debug: zero erros e 26 avisos, nenhum novo.
+- `assembleRelease assembleSizeBaseline lintRelease`: sucesso. APK release (R8) de **759.953 bytes** (725.441 na 0.6.0, +34,5 KB), sizeBaseline de 2.634.807 bytes, lint release com zero erros e os mesmos 25 avisos da 0.6.0. Mesmo certificado (`70c09aad…74aa32`). O manifesto release tem `ClipImageProvider`, `MediaControlService` (`mediaPlayback`), `MediaWidget` e `MediaTileService` protegido por `BIND_QUICK_SETTINGS_TILE`, sem `DebugInviteReceiver` nem VIBRATE. O teste de ponta a ponta usou o APK debug; depois do bump para o versionCode 601, o APK release foi instalado por cima dele no Android 16 e testado com o executável release assinado do PC: pareamento mantido, agendar e cancelar energia, imagem do PC copiada no celular e controles de mídia (Pausar, Fechar).
+- Novos: `PcListTest` (migração do pareamento único das versões anteriores com o nome do Windows, parear de novo o mesmo PC substitui o registro, limite de 8, remover o atual passa ao usado mais recentemente, ordem da lista, JSON defensivo, registro sem `pcId` identificado pela identidade fixada), `MediaRulesTest` (sessão seguida, alternar vira pausar ou tocar, comandos conforme as capacidades, quando o serviço começa e termina, textos do widget e do bloco), `Negotiated061Test` (exemplos `negotiated061`, estado `power`, welcome e `file.push` estritos, builders de energia), `ClipImagesTest` (limites, sincronização e revisão dos pushes, PNG/JPEG enviados como estão e o resto convertido, chaves de imagem que não colidem com texto, imagens da própria autoridade, tracker com imagens, regras das ofertas) e `PowerLabelsTest` (prazos oferecidos, contagem e mensagens).
+- `CredentialStore`, `MediaControlService`, `MediaTileService`, `MediaWidget`, `PowerPanel` e `ClipImageProvider` dependem do Keystore e do sistema e foram cobertos pelos testes de ponta a ponta abaixo.
+
+### Ponta a ponta: PC real + emuladores Android 13 e 16
+
+Windows 11 Pro (build 26300) com o executável release desta branch (`tauri build --no-bundle`), o AVD PCRemote_API33 (Android 13) e o PCRemote_Validation (Android 16, API 36), ambos com o APK debug da branch. Pareamento por convite entregue pelo adb ao `DebugInviteReceiver` (só na build debug), com código e aprovação no PC. A ponte de clipboard do emulador ficou desligada durante o teste. Para ter dois PCs com um computador só, a segunda instância rodou com `APPDATA` próprio (identidade e certificado novos) e `COMPUTERNAME=PC-TESTE-B`, uma de cada vez na porta 43127. Evidências em `artifacts/qa/0.6.1-e2e/` (fora dos repositórios).
+
+| Cenário | Resultado |
+|---|---|
+| Atualizar o celular 0.5.0 → 0.6.0 → 0.6.1 (Android 13) | Pareamento migrado para a lista `computers`; `credential` e `pcOs` removidas depois de gravar; reconectou sozinho com "Windows 11 Pro" |
+| Celular 0.6.0 com PC 0.6.1 | Conectou com touchpad armado: o PC não mandou campos novos a quem não negociou |
+| Agendar energia | "Desligar · Em 15 min": celular "Desliga às 22:24 (em 15 min)" (fuso UTC do emulador); painel "Desligar às 19:24 · pedido por Google sdk_gphone64_x86_64" com Cancelar; notificação do Windows |
+| Cancelar | Pelo celular e pelo botão do painel; some nos dois lados |
+| Interromper com agendamento | Agendamento descartado; celular com os quatro botões desabilitados e "Bloqueado no PC. Libere no PC Remote do Windows."; PC "Mouse, teclado e energia bloqueados"; Liberar reabilitou |
+| Bloquear agora (Android 16) | O Windows bloqueou (LogonUI) e o celular continuou conectado |
+| Imagem PC → celular, formato PNG | 1920×1080, 289.192 bytes, SHA-256 igual ao original; "Imagem do PC copiada no celular." com miniatura; o Gboard ofereceu a imagem e colou como anexo no Google Mensagens (nada enviado) |
+| Imagem PC → celular, só bitmap | Convertida em PNG 800×600; 9.890 pixels amostrados iguais ao original, opaca; o cache guardou só a última |
+| Sincronização desligada no celular | Push automático não chegou; "Buscar do PC" copiou a imagem (chip Manual) |
+| Texto e imagem juntos no PC | Chegou o texto; a imagem foi ignorada |
+| Imagem celular → PC ("Copy image" no Chrome, voltar ao app) | Android 13 e 16: PNG com SHA-256 igual ao do arquivo original (5.969 e 13.504 bytes); o Windows ficou com `PNG`, `CF_DIBV5` e bitmap. Funcionou também depois de 90 s com o processo congelado pelo Android 16 (`isFrozen=true`). "Enviar o que copiei" enviou a imagem. A primeira de cinco tentativas automáticas, logo depois das telas iniciais do Chrome, não enviou e não se repetiu |
+| Eco | **Achado e corrigido:** o PC devolvia ao celular o que acabara de receber dele, texto também (já acontecia na 0.6.0). `CloseClipboard` acrescenta os formatos sintetizados e avança o número de sequência, e o PC guardava o número lido antes de fechar. Agora a escrita devolve o número depois de fechar; o histórico mostra só "Recebido do celular" |
+| Vários PCs | O celular recusou a instância B no endereço do PC A (identidade fixada não confere). Convite + aprovação: PC-TESTE-B virou o atual e DESKTOP-HT6RNN3 foi para "Outros PCs". Seletor "Trocar de PC" na barra; trocar reconectou ao A; remover o B com confirmação tirou o cartão e o seletor |
+| Mídia fora do app (Android 13) | Serviço `mediaPlayback` ao abrir o app com o PC tocando; controles na área de notificações e na tela de bloqueio ("PC Remote teste de midia · Reprodutor Multimídia"); Pausar e Tocar mudaram o Reprodutor Multimídia; continuou funcionando com Doze forçado por 40 s; "Fechar" encerrou o serviço |
+| Mídia fora do app (Android 16) | Serviço `mediaPlayback` com notificação não dispensável; Pausar e Fechar |
+| Bloco "Mídia do PC" | Android 13 e 16: conectado, alterna na hora; com o processo encerrado, sobe o serviço, conecta e alterna |
+| Widget "Mídia do PC" | Android 13 e 16: com o processo encerrado, o toque sobe o serviço, conecta e alterna |
+
+Não testado de ponta a ponta: suspender, desligar e reiniciar de verdade (encerrariam a sessão de teste; cobertos por testes com executor de registro), aviso de 60 s antes do prazo, limite de 3 pedidos em 10 s, limite de 8 PCs e "Remover este PC" passando ao próximo (testes JVM), conversão de WebP/GIF/HEIC no celular e imagens acima de 32 MB, celular físico e Wi-Fi real, Android 7 a 12. O seletor de saída dos controles de mídia do Android mostra "This phone": é o padrão do sistema para uma sessão local, e o app não assume as teclas de volume do celular.
+
 ## Atualização 0.6.0-kotlin — menos chaves, arquivos de até 1 GB nos dois sentidos, voz e sem vibração, 16/10/2026
 
 ### Testes automatizados

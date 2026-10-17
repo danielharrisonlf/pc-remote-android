@@ -1,6 +1,6 @@
 # Arquitetura — Android Kotlin
 
-Android e Windows são repositórios independentes. Protocolo 1 com as extensões negociadas input.v1, files.v1, files.v2, search.v1 e info.v1 é o único contrato com o desktop Rust/Tauri. Desktop 0.4.x/0.5.x aceita só input.v1 e files.v1; 0.2.x e 0.3.0, só input.v1. O app pede todas e usa o que o welcome anunciar.
+Android e Windows são repositórios independentes. Protocolo 1 com as extensões negociadas input.v1, files.v1, files.v2, search.v1, info.v1, power.v1 e clipboard.v2 é o único contrato com o desktop Rust/Tauri. Desktop 0.6.0 aceita até info.v1; 0.4.x/0.5.x, só input.v1 e files.v1; 0.2.x e 0.3.0, só input.v1. O app pede todas e usa o que o welcome anunciar.
 
 | Arquivo | Responsabilidade |
 |---|---|
@@ -25,7 +25,13 @@ Android e Windows são repositórios independentes. Protocolo 1 com as extensõe
 | FileRules.kt | Regras puras de nome, mime, extensão, assinatura, tamanho, mensagens e fila, nas duas versões da extensão |
 | VolumeInteraction.kt | Rajadas de volume com valor final confirmado e passos das teclas físicas |
 | ClipboardTracker.kt | Baseline em foco, supressão de eco e recópias sem histórico |
-| CredentialStore.kt / CommittedValue.kt | Android Keystore/AES-GCM; falhas de gravação não expõem credencial candidata |
+| CredentialStore.kt / CommittedValue.kt | Android Keystore/AES-GCM da lista de PCs pareados; migra o registro único anterior; falhas de gravação não expõem credencial candidata |
+| PcList.kt | Regras puras da lista de PCs: até 8, PC atual, mesmo `pcId` substitui, próximo ao remover, JSON e migração |
+| MediaRemote.kt | Regras puras dos controles fora do app (sessão seguida, comandos, quando o serviço começa e termina, textos do widget e do bloco) e o MediaCoordinator, que observa o cliente e as Activities |
+| MediaControlService.kt | Serviço em primeiro plano `mediaPlayback` com MediaSession e notificação MediaStyle; comando sob demanda do widget e do bloco |
+| MediaTileService.kt / MediaWidget.kt | Bloco "Mídia do PC" das Configurações rápidas e widget "Mídia do PC" da tela inicial |
+| PowerPanel.kt | Cartão "Energia do PC" (power.v1): Bloquear, Suspender, Desligar, Reiniciar, prazos e agendamento |
+| ClipImages.kt | Regras puras das imagens do clipboard (clipboard.v2), ClipImageProvider e arquivos em `cache/clipboard` e `cache/clipboard-out` |
 | QrScanner.kt / QrScanGate.kt | Scanner pertencente à Activity, uma leitura por vez e descarte após destruição |
 | BackNavigation.kt | APIs exclusivas do Android 13 isoladas por verificação de versão |
 | Protocol.kt | Validação estrita, limites, dedup/revisões e convite QR |
@@ -43,11 +49,17 @@ Com um arquivo de 8 MiB ou mais em movimento e o app em primeiro plano, o Remote
 
 Toda execução Windows permanece em Rust: Core Audio, GSMTC, SendInput e listener nativo do clipboard. Fechar janela desktop mantém serviço na bandeja. Identidade Windows é protegida por DPAPI; revogação remove token e fecha sessão. Descoberta apenas informa endereço; certificado fixado e hostname validado autenticam o transporte.
 
-Clipboard sem histórico. Desde a 0.6 uma só preferência, **Sincronização em tempo real** (ligada por padrão), manda `sync.set` com os dois sentidos. O texto do PC é aplicado direto, também em segundo plano enquanto a conexão existir; com o app em foco cada cópia vai ao PC; ao voltar o foco, ClipboardTracker compara o texto atual com a referência desta execução (último texto visto, aplicado ou enviado) e envia uma vez o que foi copiado em outro app. Na primeira abertura só registra a referência. Sem conexão no retorno, o texto espera o primeiro snapshot da próxima conexão, para usar a revisão certa, e só vai se ainda estiver na área de transferência. O texto aplicado vira a referência e não volta. UUIDs e revisões ordenadas pelo PC, com supressão de eco, evitam loops. Conflito automático rejeita revisão antiga; ação manual substitui explicitamente. Buscar do PC copia direto no celular.
+Clipboard sem histórico. Desde a 0.6 uma só preferência, **Sincronização em tempo real** (ligada por padrão), manda `sync.set` com os dois sentidos. O texto do PC é aplicado direto, também em segundo plano enquanto a conexão existir; com o app em foco cada cópia vai ao PC; ao voltar o foco, ClipboardTracker compara o texto atual com a referência desta execução (último texto visto, aplicado ou enviado) e envia uma vez o que foi copiado em outro app. Na primeira abertura só registra a referência. Sem conexão no retorno, o texto espera o primeiro snapshot da próxima conexão, para usar a revisão certa, e só vai se ainda estiver na área de transferência. O texto aplicado vira a referência e não volta. UUIDs e revisões ordenadas pelo PC, com supressão de eco, evitam loops. Com PC 0.6.1 (clipboard.v2) as imagens seguem as mesmas regras: o tracker compara uma chave do URI da imagem; o `file.push` com `clipboard` grava a imagem no cache e a põe na área de transferência pelo ClipImageProvider; uma imagem copiada em outro app é copiada para `cache/clipboard-out` (PNG e JPEG como estão; WebP, GIF, HEIC e BMP convertidos em PNG) e oferecida na frente da fila de arquivos. Um clip com a autoridade do próprio app nunca volta ao PC. Conflito automático rejeita revisão antiga; ação manual substitui explicitamente. Buscar do PC copia direto no celular.
 
 Mídia: o PC 0.6 lista a sessão atual do Windows primeiro e o app a segue enquanto o usuário não tocar em outra. Depois de Reproduzir/Pausar o botão mostra o estado pedido até um snapshot concordar ou 2,5 s passarem. Voz: o microfone abre só no toque e fecha no fim da fala, ao cancelar ou ao sair do app (RECORD_AUDIO pedido no primeiro uso). VoiceCommands trata a frase inteira como comando (reproduzir, pausar, próxima, anterior, ±10 s, volume, mudo) ou, senão, como pesquisa; a pesquisa vai ao PC com `search.open` e fica no campo para correção.
 
-Conexão: a aba mostra só nome do PC, estado, sistema (info.v1, guardado para exibir desconectado) e ações. Fingerprint e endereço continuam conferidos a cada conexão e não aparecem. O endereço descoberto pelo mDNS para o mesmo PC é gravado após um welcome válido, então não existe mais a correção manual de IP.
+Conexão: a aba mostra só nome do PC, estado, sistema (info.v1, guardado por PC para exibir desconectado) e ações. Fingerprint e endereço continuam conferidos a cada conexão e não aparecem. O endereço descoberto pelo mDNS para o mesmo PC é gravado após um welcome válido, então não existe mais a correção manual de IP.
+
+Vários PCs (0.6.1): o CredentialStore guarda até 8 PCs, cada um com token, identidade fixada e `deviceId` próprios, e qual é o atual. "Adicionar PC" abre o pareamento; um PC novo vira o atual e o mesmo `pcId` substitui o registro. O cartão "Outros PCs" e o seletor "Trocar de PC" da barra superior (com mais de um PC) trocam de PC: a conexão anterior fecha e a fila e o histórico de arquivos são descartados, como ao remover. Remover o PC atual passa ao usado mais recentemente.
+
+Energia (0.6.1): o PowerPanel aparece abaixo do PC atual. Com PC que anunciou `power.control`, envia `power.run` e `power.cancel`; o agendamento vem no snapshot e a contagem é local, a cada 30 s. Com Interromper ativo no PC os botões ficam desabilitados.
+
+Mídia fora do app (0.6.1): o MediaCoordinator, criado com o cliente, inicia o MediaControlService quando o app está em primeiro plano, o PC conectado e a sessão seguida tocando. O serviço publica uma MediaSession própria (sem `setPlaybackToRemote`) e a notificação MediaStyle, que o sistema também mostra na tela de bloqueio; os callbacks viram `media.control`. Enquanto ele existe, `RemoteClient.keepAlive` faz o cliente reconectar com o app em segundo plano. Ele termina depois de 30 s sem sessão, 15 min pausado com o app fechado, 60 s sem conexão, em "Fechar" ou ao desconectar, remover ou trocar de PC. O widget manda o comando ao serviço por `PendingIntent.getForegroundService`; o serviço conecta se preciso, espera o primeiro snapshot por até 10 s e executa. O bloco alterna direto pelo cliente quando já está conectado; senão usa o serviço da mesma forma e, se o Android recusar iniciá-lo, conecta e envia pelo próprio cliente. O widget é redesenhado no máximo 2 vezes por segundo.
 
 Novas ações requerem tipo, validação, capacidade, autorização e integração Rust própria. Sem endpoint shell. Outros tipos de arquivo exigiriam mudar o contrato files.v1. Touchpad/teclado explícitos operam na janela em foco; não são fallback universal de mídia. Veja PROTOCOL.md, INPUT.md e MEDIA-COMPATIBILITY.md.
 
