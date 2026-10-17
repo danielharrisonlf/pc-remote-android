@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- No periodic updates: MediaCoordinator redraws the widget when something changes. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+  android:initialLayout="@layout/widget_media"
+  android:minWidth="250dp"
+  android:minHeight="40dp"
+  android:resizeMode="horizontal"
+  android:updatePeriodMillis="0"
+  android:widgetCategory="home_screen" />

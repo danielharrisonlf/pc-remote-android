@@ -41,7 +41,10 @@ internal class FileTransfer(
 ) {
   private enum class Phase { OFFER, CONNECT, ACCEPT, STREAM, END }
 
-  private class Job(val item: FileItem, val generation: Int, val twoWay: Boolean) {
+  /** clipboard.v2: an image copied on the phone; [done] gets null when the PC took it, else the reason. */
+  private class ClipUpload(val item: FileItem, val offer: ClipOffer, val done: (String?) -> Unit)
+
+  private class Job(val item: FileItem, val generation: Int, val twoWay: Boolean, val clip: ClipUpload? = null) {
     val transferId: String = UUID.randomUUID().toString()
     var phase = Phase.OFFER
     var offerId: String? = null
@@ -63,6 +66,8 @@ internal class FileTransfer(
   private val queue = FileQueue()
   private val checker = Executors.newSingleThreadExecutor { task -> Thread(task, "pc-remote-file-check").apply { isDaemon = true } }
   private var active: Job? = null
+  /** The clipboard image waiting its turn; it goes before queued files and a newer copy replaces it. */
+  private var clip: ClipUpload? = null
   private var paused = false
   private var last: FileResult? = null
   private var checking = 0
@@ -99,6 +104,13 @@ internal class FileTransfer(
     publishNow()
   }
 
+  /** A clipboard image goes next, without joining the list or the history. */
+  fun addClipboard(item: FileItem, offer: ClipOffer, done: (String?) -> Unit) {
+    clip?.done?.invoke(SUPERSEDED)
+    clip = ClipUpload(item, offer, done)
+    pump()
+  }
+
   /** The user's Cancelar: the PC drops the ticket or the partial file. */
   fun cancel() {
     val job = active ?: return
@@ -127,6 +139,8 @@ internal class FileTransfer(
   fun connectionEnded() {
     session++
     cancelling = 0
+    clip?.done?.invoke("Conexão interrompida.")
+    clip = null
     active?.let { job -> finish(job, FileResult("${job.item.name} não foi enviado. A conexão com o PC caiu.", FileOutcome.FAILED)) }
     publishNow()
   }
@@ -141,6 +155,8 @@ internal class FileTransfer(
 
   /** Starts the next file when the PC accepts files and nothing else is in flight. */
   fun pump() {
+    val waiting = clip
+    if (active == null && cancelling == 0 && waiting != null) link()?.takeIf { it.twoWay }?.let { l -> clip = null; start(waiting.item, l, waiting) }
     if (active == null && !paused && cancelling == 0 && !queue.isEmpty()) link()?.let { l -> queue.next()?.let { start(it, l) } }
     publishNow()
   }
@@ -152,18 +168,23 @@ internal class FileTransfer(
     else release(t.transferId)
   }
 
-  private fun start(item: FileItem, l: FileLink) {
-    val job = Job(item, l.generation, l.twoWay)
+  private fun start(item: FileItem, l: FileLink, clip: ClipUpload? = null) {
+    val job = Job(item, l.generation, l.twoWay, clip)
     active = job
+    if (clip != null) { offer(job, RemoteAction.FileOffer(job.transferId, item.name, item.size, item.mime, twoWay = true, clipboard = clip.offer), true); return }
     // A PC without files.v2 takes only the files.v1 form: PNG, JPG or PDF up to 50 MB.
     val form = if (l.twoWay) FileRules.Check.Ok(item.name, item.mime, item.size) else item.legacy
     if (form == null) { fail(job, "Atualize o PC Remote no Windows para enviar este arquivo.", pause = false, cancel = false); return }
     if (item.size > l.maxBytes) { fail(job, "O PC aceita até ${FileRules.limitLabel(l.maxBytes)}.", pause = false, cancel = false); return }
-    job.offerId = control(RemoteAction.FileOffer(job.transferId, form.name, item.size, form.mime, l.twoWay)) { error, code ->
+    offer(job, RemoteAction.FileOffer(job.transferId, form.name, item.size, form.mime, l.twoWay), l.twoWay)
+  }
+
+  private fun offer(job: Job, action: RemoteAction.FileOffer, twoWay: Boolean) {
+    job.offerId = control(action) { error, code ->
       if (active !== job || job.phase != Phase.OFFER) return@control
       val t = job.ticket
       when {
-        error != null -> fail(job, FileRules.errorMessage(code, error, l.twoWay), FileRules.pausesQueue(code), cancel = false)
+        error != null -> fail(job, if (job.clip != null) ClipImages.errorMessage(code, error) else FileRules.errorMessage(code, error, twoWay), FileRules.pausesQueue(code), cancel = false)
         t == null -> fail(job, "O PC não enviou a autorização do arquivo.", pause = true, cancel = true)
         else -> connect(job, t)
       }
@@ -201,14 +222,14 @@ internal class FileTransfer(
     if (active !== job || job.socket !== ws) return
     when {
       // The PC deletes partial data and closes after an error, so there is nothing to cancel.
-      message is FileMessage.Error -> fail(job, FileRules.errorMessage(message.code, message.message, job.twoWay), FileRules.pausesQueue(message.code), cancel = false)
+      message is FileMessage.Error -> fail(job, if (job.clip != null) ClipImages.errorMessage(message.code, message.message) else FileRules.errorMessage(message.code, message.message, job.twoWay), FileRules.pausesQueue(message.code), cancel = false)
       message is FileMessage.Accept && job.phase == Phase.ACCEPT && message.id == job.beginId && message.transferId == job.transferId -> stream(job, ws)
       message is FileMessage.Progress && (job.phase == Phase.STREAM || job.phase == Phase.END) && message.transferId == job.transferId &&
         message.received >= job.received && message.received <= minOf(job.sent, job.item.size) -> progress(job, message.received)
       message is FileMessage.Done && job.phase == Phase.END && message.id == job.endId && message.transferId == job.transferId -> {
         job.received = job.item.size
         finish(job, FileResult("${message.name} enviado ao PC.", FileOutcome.SENT))
-        recorded(FileRecord(message.name, job.item.size, System.currentTimeMillis(), toPc = true))
+        if (job.clip != null) job.clip.done(null) else recorded(FileRecord(message.name, job.item.size, System.currentTimeMillis(), toPc = true))
         pump()
       }
       else -> fail(job, "O PC respondeu fora do protocolo.", pause = true, cancel = true)
@@ -300,6 +321,13 @@ internal class FileTransfer(
 
   private fun fail(job: Job, reason: String, pause: Boolean, cancel: Boolean) {
     if (active !== job) return
+    // A clipboard image fails quietly: the caller shows the reason only for a manual send.
+    if (job.clip != null) {
+      finish(job, FileResult(reason, FileOutcome.FAILED))
+      if (cancel) release(job.transferId)
+      pump()
+      return
+    }
     val result = FileResult("${job.item.name} não foi enviado. $reason", FileOutcome.FAILED)
     finish(job, result)
     if (pause) paused = true
@@ -316,6 +344,7 @@ internal class FileTransfer(
     job.watchdog = null
     job.lock.withLock { job.stopped = true; job.moved.signalAll() }
     job.socket?.let { if (result.outcome == FileOutcome.SENT) it.close(1000, null) else it.cancel() }
+    if (job.clip != null) { if (result.outcome != FileOutcome.SENT) job.clip.done(result.message); return }
     last = result
   }
 
@@ -327,7 +356,7 @@ internal class FileTransfer(
   }
 
   private fun publishNow() {
-    val job = active
+    val job = active?.takeIf { it.clip == null }
     publish(FilesView(job?.let { FileProgress(it.item.name, it.item.size, it.received, it.phase >= Phase.STREAM) }, queue.names, paused, last))
   }
 
@@ -360,5 +389,6 @@ internal class FileTransfer(
 
   private companion object {
     const val STALL_MS = 20_000L
+    const val SUPERSEDED = "Substituída por uma cópia mais nova."
   }
 }

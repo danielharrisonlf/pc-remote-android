@@ -9,6 +9,8 @@
   <!-- Only while a file moves between the phone and the PC. -->
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+  <!-- Media controls of the PC outside the app (notification, lock screen), while the PC has a session. -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
   <!-- In-app updates of this app only, through PackageInstaller after the user taps. -->
   <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
   <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
@@ -18,6 +20,10 @@
   </queries>
   <application android:name="com.pcremote.RemoteApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:theme="@style/AppTheme" android:allowBackup="false" android:usesCleartextTraffic="false">
     <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode_ui" />
+    <!-- clipboard.v2: images from the PC are pasted from cache/clipboard; nothing else is shared. -->
+    <provider android:name="com.pcremote.ClipImageProvider" android:authorities="${applicationId}.clipboard" android:exported="false" android:grantUriPermissions="true">
+      <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/clipboard_paths" />
+    </provider>
     <activity android:name="com.pcremote.MainActivity" android:exported="true" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize">
       <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
       <!-- Shared text fills the draft; any shared file joins the queue for the PC. -->
@@ -26,6 +32,16 @@
       <intent-filter><action android:name="android.intent.action.SEND_MULTIPLE" /><category android:name="android.intent.category.DEFAULT" /><data android:mimeType="*/*" /></intent-filter>
     </activity>
     <service android:name="com.pcremote.TransferService" android:exported="false" android:foregroundServiceType="dataSync" />
+    <!-- The PC's playback in a media notification; it never plays audio on the phone. -->
+    <service android:name="com.pcremote.MediaControlService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
+    <!-- Exported because the system binds it; only holders of BIND_QUICK_SETTINGS_TILE (System UI) can. -->
+    <service android:name="com.pcremote.MediaTileService" android:exported="true" android:label="@string/media_label" android:icon="@drawable/ic_music" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+      <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
+    </service>
+    <receiver android:name="com.pcremote.MediaWidget" android:exported="false" android:label="@string/media_label">
+      <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/media_widget_info" />
+    </receiver>
     <receiver android:name="com.pcremote.UpdateInstallReceiver" android:exported="false" />
     <receiver android:name="com.pcremote.UpdatedReceiver" android:exported="false">
       <intent-filter><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>

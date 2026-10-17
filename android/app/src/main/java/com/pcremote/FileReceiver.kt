@@ -48,6 +48,9 @@ internal class FileReceiver(
   private val failed: (String) -> Unit,
   private val recorded: (FileRecord) -> Unit,
   private val foreground: () -> Boolean,
+  /** clipboard.v2: where a clipboard image goes, and its file once verified (null when it failed). */
+  private val clipFolder: (Long) -> File? = { null },
+  private val clipDone: (Incoming.FilePush, File?) -> Unit = { _, _ -> },
 ) {
   /** FINISHING: size and hash matched and the file is being made visible; nothing aborts it any more. */
   private enum class Phase { PREPARE, CONNECT, ACCEPT, STREAM, FINISHING, DONE }
@@ -60,6 +63,8 @@ internal class FileReceiver(
   }
 
   private class Job(val push: Incoming.FilePush, val generation: Int, val name: String) {
+    /** A clipboard image: private cache, no list, no notification, no visible error. */
+    val clip = push.clipboard != null
     val sha: MessageDigest = MessageDigest.getInstance("SHA-256")
     /** Written under the job's monitor; volatile so the main thread reads it without waiting on disk I/O. */
     @Volatile var phase = Phase.PREPARE
@@ -128,6 +133,7 @@ internal class FileReceiver(
 
   /** Worker thread: free space, then the pending entry the bytes go to. */
   private fun prepare(j: Job): Target {
+    if (j.clip) return ClipTarget(clipFolder(j.push.size) ?: throw NoSpace(), j.push.transferId, j.push.name)
     val volume = app.getExternalFilesDir(null) ?: throw StorageUnavailable()
     if (StatFs(volume.path).availableBytes < j.push.size + FileRules.FREE_MARGIN) throw NoSpace()
     return if (Build.VERSION.SDK_INT >= 29) MediaTarget(app.contentResolver, j.name, j.push.mime) else {
@@ -264,6 +270,13 @@ internal class FileReceiver(
 
   private fun saved(j: Job, record: FileRecord) {
     if (job !== j) return
+    if (j.clip) {
+      job = null
+      main.removeCallbacks(watchdog)
+      publishNow()
+      clipDone(j.push, record.uri?.let { Uri.parse(it).path }?.let(::File))
+      return
+    }
     finish(j, FileResult("${record.name} recebido do PC.", FileOutcome.SENT))
     recorded(record)
     if (!foreground()) notifySaved(record)
@@ -290,13 +303,14 @@ internal class FileReceiver(
     if (job !== j) return
     job = null
     main.removeCallbacks(watchdog)
+    if (j.clip) { publishNow(); clipDone(j.push, null); return }
     last = result
     if (result.outcome == FileOutcome.FAILED) failed(result.message)
     publishNow()
   }
 
   private fun publishNow() {
-    val j = job
+    val j = job?.takeUnless { it.clip }
     val streaming = j != null && j.phase >= Phase.STREAM
     publish(j?.let { FileProgress(it.name, it.push.size, it.received, streaming) }, last)
   }
@@ -368,6 +382,28 @@ internal class FileReceiver(
         if (!target.exists() && part.renameTo(target)) return candidate to null
       }
       throw IOException("name")
+    }
+
+    override fun drop() {
+      if (dropped) return
+      dropped = true
+      try { output.close() } catch (_: Exception) {}
+      part.delete()
+    }
+  }
+
+  /** clipboard.v2: cache/clipboard/<transferId>.png, renamed from a part file once verified. */
+  private class ClipTarget(folder: File, transferId: String, private val name: String) : Target {
+    private val part = File(folder, ".$transferId.part")
+    private val final = File(folder, "$transferId.png")
+    override val output: OutputStream = FileOutputStream(part)
+    private var dropped = false
+
+    override fun keep(): Pair<String, Uri?> {
+      (output as FileOutputStream).fd.sync()
+      output.close()
+      if (!part.renameTo(final)) throw IOException("rename")
+      return name to Uri.fromFile(final)
     }
 
     override fun drop() {

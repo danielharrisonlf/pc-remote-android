@@ -4,11 +4,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+/** clipboard.v2: a file.push that carries an image for the clipboard. */
+internal data class ClipPush(val revision: Long, val automatic: Boolean)
+
 internal sealed interface Incoming {
   /** [fileReceive] (file.receive) means the PC took files.v2; [os] comes from info.v1. */
-  data class Welcome(val id: String, val pcId: String, val pcName: String, val input: Boolean, val files: Boolean = false, val fileReceive: Boolean = false, val search: Boolean = false, val os: String = "") : Incoming
+  data class Welcome(val id: String, val pcId: String, val pcName: String, val input: Boolean, val files: Boolean = false, val fileReceive: Boolean = false, val search: Boolean = false, val os: String = "", val power: Boolean = false, val clipboardImage: Boolean = false) : Incoming
   /** files.v2: the PC offers a file to this phone; the ticket opens /v1/files with file.fetch. */
-  data class FilePush(val transferId: String, val name: String, val size: Long, val mime: String, val ticket: String) : Incoming
+  data class FilePush(val transferId: String, val name: String, val size: Long, val mime: String, val ticket: String, val clipboard: ClipPush? = null) : Incoming
   /** Sent before the ack of a file.offer; [id] is the offer request id. */
   data class FileTicket(val id: String, val transferId: String, val ticket: String, val chunkBytes: Int, val windowBytes: Int) : Incoming
   data class PairPending(val id: String) : Incoming
@@ -50,7 +53,10 @@ internal object Protocol {
   private val tokenPattern = Regex("[a-fA-F0-9]{64}")
   private val lowerHex = Regex("[a-f0-9]{64}")
   private val errorCodes = setOf("invalid_message", "version_mismatch", "unauthorized", "pairing_expired", "pairing_denied", "rate_limited", "unavailable", "conflict", "sensitive", "too_large", "clipboard_busy", "internal", "file_type", "file_busy", "file_integrity", "storage")
-  private val capabilities = setOf("audio", "media", "clipboard.text", "input.control", "file.transfer", "file.receive", "search.youtube")
+  private val capabilities = setOf("audio", "media", "clipboard.text", "input.control", "file.transfer", "file.receive", "search.youtube", "power.control", "clipboard.image")
+  val powerActions = setOf("lock", "sleep", "shutdown", "restart")
+  /** power.v1: up to 24 h; lock only now. */
+  fun powerValid(action: String, delaySeconds: Int): Boolean = action in powerActions && delaySeconds in 0..86400 && (action != "lock" || delaySeconds == 0)
   /** files.v2 MIME: lowercase type/subtype, informative only. */
   private val mimePattern = Regex("[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+")
   private val declineCodes = setOf("storage", "unavailable")
@@ -125,8 +131,10 @@ internal object Protocol {
     when (str(o, "type")) {
       "welcome" -> { exactOptional(o, setOf("v", "type", "id", "pcId", "pcName", "capabilities"), setOf("os")); val arr = array(o,"capabilities"); if (arr.length() > 16) return null; val caps = (0 until arr.length()).map { arr.opt(it) as? String ?: return null }; if (!caps.all { it in capabilities }) return null
         val os = if (o.has("os")) str(o,"os").also { if (!validText(it, 64, true)) return null } else ""
-        Incoming.Welcome(uid(o,"id"),uid(o,"pcId"),str(o,"pcName").also { if (!validText(it, 256)) return null },"input.control" in caps,"file.transfer" in caps,"file.receive" in caps,"search.youtube" in caps,os) }
-      "file.push" -> { exact(o,"v","type","transferId","name","size","mime","ticket"); Incoming.FilePush(uid(o,"transferId"),str(o,"name").also { if (!validText(it,255,true)) return null },number(o,"size").also { if (it<1 || it>FileRules.MAX_BYTES) return null },str(o,"mime").also { if (!mimeValid(it)) return null },str(o,"ticket").also { if (!lowerHex.matches(it)) return null }) }
+        Incoming.Welcome(uid(o,"id"),uid(o,"pcId"),str(o,"pcName").also { if (!validText(it, 256)) return null },"input.control" in caps,"file.transfer" in caps,"file.receive" in caps,"search.youtube" in caps,os,"power.control" in caps,"clipboard.image" in caps) }
+      "file.push" -> { exactOptional(o,setOf("v","type","transferId","name","size","mime","ticket"),setOf("clipboard"))
+        val clip = if (o.has("clipboard")) { val c=obj(o,"clipboard"); exact(c,"revision","automatic"); ClipPush(number(c,"revision"),bool(c,"automatic")) } else null
+        Incoming.FilePush(uid(o,"transferId"),str(o,"name").also { if (!validText(it,255,true)) return null },number(o,"size").also { if (it<1 || it>FileRules.MAX_BYTES) return null },str(o,"mime").also { if (!mimeValid(it)) return null },str(o,"ticket").also { if (!lowerHex.matches(it)) return null },clip) }
       "file.ticket" -> { exact(o,"v","type","id","transferId","ticket","chunkBytes","windowBytes"); val chunk=signed(o,"chunkBytes",1,MAX_CHUNK); Incoming.FileTicket(uid(o,"id"),uid(o,"transferId"),str(o,"ticket").also { if (!lowerHex.matches(it)) return null },chunk,signed(o,"windowBytes",chunk,MAX_WINDOW)) }
       "pair.pending" -> { exact(o,"v","type","id"); Incoming.PairPending(uid(o,"id")) }
       "pair.result" -> { exact(o,"v","type","id","pcId","pcName","token"); Incoming.PairResult(uid(o,"id"),uid(o,"pcId"),str(o,"pcName").also { if (!validText(it,256)) return null },str(o,"token").also { if (!tokenPattern.matches(it)) return null }) }
@@ -134,7 +142,7 @@ internal object Protocol {
       "error" -> { exact(o,"v","type","id","code","message","retryable"); Incoming.Error(uid(o,"id"),str(o,"code").also { if (it !in errorCodes) return null },str(o,"message").also { if (!validText(it,4096)) return null },bool(o,"retryable")) }
       "clipboard.event" -> { exact(o,"v","type","eventId","origin","revision","text","automatic"); if (str(o,"origin") != "windows") return null; Incoming.Clipboard(uid(o,"eventId"),number(o,"revision"),str(o,"text").also { if (!validText(it)) return null },bool(o,"automatic")) }
       "state" -> {
-        exactOptional(o,setOf("v","type","revision","audio","media","clipboardRevision","sync"),setOf("input","files"))
+        exactOptional(o,setOf("v","type","revision","audio","media","clipboardRevision","sync"),setOf("input","files","power"))
         val audio = obj(o,"audio"); exact(audio,"available","percent","muted","error")
         val error = audio.opt("error"); if (error !== JSONObject.NULL && error !is String) return null
         if (error is String && !validText(error,4096)) return null
@@ -151,7 +159,12 @@ internal object Protocol {
         val sync=obj(o,"sync"); exact(sync,"upload","download","paused"); bool(sync,"upload"); bool(sync,"download"); bool(sync,"paused")
         val input = if(o.has("input")) { val i=obj(o,"input"); exact(i,"allowed","enabled"); InputState(bool(i,"allowed"),bool(i,"enabled")) } else null
         val files = if(o.has("files")) { val f=obj(o,"files"); exact(f,"allowed","maxBytes"); FilesState(bool(f,"allowed"),number(f,"maxBytes").also { if(it<1 || it>FileRules.MAX_BYTES) return null }) } else null
-        Incoming.State(Snapshot(number(o,"revision"),a,sessions,number(o,"clipboardRevision"),input,files))
+        val power = if(o.has("power")) { val pw=obj(o,"power"); exact(pw,"allowed","scheduled")
+          val s = pw.opt("scheduled")
+          val scheduled = if (s === JSONObject.NULL) null else { val sc = s as? JSONObject ?: return null; exact(sc,"action","remainingSeconds")
+            PowerSchedule(str(sc,"action").also { if (it !in powerActions) return null },number(sc,"remainingSeconds").also { if (it<1 || it>86400) return null }) }
+          PowerState(bool(pw,"allowed"),scheduled) } else null
+        Incoming.State(Snapshot(number(o,"revision"),a,sessions,number(o,"clipboardRevision"),input,files,power))
       }
       else -> null
     }
@@ -200,10 +213,15 @@ internal object Protocol {
       is RemoteAction.PointerScroll -> if(a.steps in -10..10 && a.steps != 0) JSONObject().put("kind","pointer.scroll").put("steps",a.steps) else null
       is RemoteAction.KeyboardText -> if(validText(a.text,1024,true)) JSONObject().put("kind","keyboard.text").put("text",a.text) else null
       is RemoteAction.KeyboardKey -> if(a.key in keys) JSONObject().put("kind","keyboard.key").put("key",a.key) else null
-      is RemoteAction.FileOffer -> if(uuid(a.transferId) && FileRules.offerValid(a.name,a.size,a.mime,a.twoWay)) JSONObject().put("kind","file.offer").put("transferId",a.transferId).put("name",a.name).put("size",a.size).put("mime",a.mime) else null
+      is RemoteAction.FileOffer -> { val c = a.clipboard
+        if (c == null) { if(uuid(a.transferId) && FileRules.offerValid(a.name,a.size,a.mime,a.twoWay)) JSONObject().put("kind","file.offer").put("transferId",a.transferId).put("name",a.name).put("size",a.size).put("mime",a.mime) else null }
+        else if(uuid(a.transferId) && uuid(c.eventId) && c.baseRevision >= 0 && ClipImages.offerValid(a.name,a.size,a.mime)) JSONObject().put("kind","file.offer").put("transferId",a.transferId).put("name",a.name).put("size",a.size).put("mime",a.mime)
+          .put("clipboard",JSONObject().put("eventId",c.eventId).put("automatic",c.automatic).put("baseRevision",c.baseRevision)) else null }
       is RemoteAction.FileCancel -> if(uuid(a.transferId)) JSONObject().put("kind","file.cancel").put("transferId",a.transferId) else null
       is RemoteAction.FileDecline -> if(uuid(a.transferId) && a.code in declineCodes) JSONObject().put("kind","file.decline").put("transferId",a.transferId).put("code",a.code) else null
       is RemoteAction.SearchOpen -> if(queryValid(a.query)) JSONObject().put("kind","search.open").put("service","youtube").put("query",a.query) else null
+      is RemoteAction.PowerRun -> if(powerValid(a.action,a.delaySeconds)) JSONObject().put("kind","power.run").put("action",a.action).put("delaySeconds",a.delaySeconds) else null
+      RemoteAction.PowerCancel -> JSONObject().put("kind","power.cancel")
     }
   } catch (_: Exception) { null }
 }

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- clipboard.v2: only the images from the PC, in the app cache, are shared with the app that pastes them. -->
+<paths>
+  <cache-path name="clipboard" path="clipboard/" />
+</paths>

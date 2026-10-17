@@ -93,10 +93,24 @@ internal class ClipboardScreen(private val host: ScreenHost) : Screen {
   }
   private val clear = ui.button("Limpar", ButtonStyle.OUTLINED, R.drawable.ic_eraser) { client.clearReceived() }
   private val receivedActions = ui.row(8).apply { addView(copy, ui.weighted()); addView(clear) }
+  // clipboard.v2: the image from the PC that is now on the phone clipboard.
+  private val imagePreview = ImageView(ui.context).apply {
+    adjustViewBounds = true
+    scaleType = ImageView.ScaleType.FIT_START
+    maxHeight = ui.dp(220)
+    contentDescription = "Imagem recebida do PC"
+  }
+  private val imageCaption = ui.text("Imagem do PC copiada no celular.", TextStyle.CAPTION, p.textSecondary)
+  private val imageBox = ui.column(8).apply {
+    addView(imagePreview, ui.matchWrap())
+    addView(imageCaption)
+  }
+  private var shownImage = ""
   private val nothing = ui.text("Nada recebido nesta conexão.", TextStyle.BODY, p.textSecondary)
   private val receivedCard = ui.card().apply {
-    addView(ui.cardHeader("Texto do PC", trailing = liveChip))
+    addView(ui.cardHeader("Recebido do PC", trailing = liveChip))
     addView(viewer)
+    addView(imageBox)
     addView(expand, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
     addView(receivedActions)
     addView(nothing)
@@ -117,10 +131,10 @@ internal class ClipboardScreen(private val host: ScreenHost) : Screen {
     }
   }
   private val sendCopied = ui.button("Enviar o que copiei", ButtonStyle.TONAL) {
-    client.sendClipboard(null) { host.result(it, "Texto enviado ao PC.") }
+    client.sendClipboard(null) { host.result(it, "Enviado ao PC.") }
   }
   private val fetch = ui.button("Buscar do PC", ButtonStyle.OUTLINED, R.drawable.ic_download) {
-    client.getClipboard { host.result(it, "Texto do PC copiado no celular.") }
+    client.getClipboard { host.result(it, "Copiado do PC.") }
   }
   private val sendCard = ui.card().apply {
     addView(ui.cardHeader("Enviar texto ao PC"))
@@ -197,8 +211,9 @@ internal class ClipboardScreen(private val host: ScreenHost) : Screen {
     val received = state.receivedText
     val has = received.isNotEmpty()
     viewer.visibility = if (has) View.VISIBLE else View.GONE
-    receivedActions.visibility = viewer.visibility
-    nothing.visibility = if (has) View.GONE else View.VISIBLE
+    renderImage(state.receivedImage)
+    receivedActions.visibility = if (has || state.receivedImage.isNotEmpty()) View.VISIBLE else View.GONE
+    nothing.visibility = if (has || state.receivedImage.isNotEmpty()) View.GONE else View.VISIBLE
     receivedText.text = received
     receivedText.maxLines = if (expanded) Int.MAX_VALUE else 8
     val long = received.lines().size > 8 || received.length > 400
@@ -218,6 +233,26 @@ internal class ClipboardScreen(private val host: ScreenHost) : Screen {
     sendCopied.isEnabled = connected
     fetch.isEnabled = connected
     renderFiles(state)
+  }
+
+  /** Decodes a reduced preview off the main thread, once per image. */
+  private fun renderImage(path: String) {
+    imageBox.visibility = if (path.isEmpty()) View.GONE else View.VISIBLE
+    if (path == shownImage) return
+    shownImage = path
+    imagePreview.setImageDrawable(null)
+    if (path.isEmpty()) return
+    val width = ui.dp(320)
+    Thread({
+      val bitmap = try {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeFile(path, bounds)
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= width) sample *= 2
+        android.graphics.BitmapFactory.decodeFile(path, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+      } catch (_: Throwable) { null }
+      imagePreview.post { if (shownImage == path) imagePreview.setImageBitmap(bitmap) }
+    }, "pc-remote-clip-preview").apply { isDaemon = true }.start()
   }
 
   private fun renderFiles(state: UiState) {

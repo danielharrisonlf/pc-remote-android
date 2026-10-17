@@ -144,8 +144,8 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
   private val pcChip = ui.chip()
   private val disconnect = ui.button("Desconectar", ButtonStyle.OUTLINED, R.drawable.ic_unplug) { client.disconnect() }
   private val reconnect = ui.button("Reconectar", ButtonStyle.FILLED, R.drawable.ic_refresh_cw) { client.reconnect() }
-  private val other = ui.button("Outro PC", ButtonStyle.TONAL, R.drawable.ic_scan_qr_code) { host.openPairingSheet() }
-  private val pcCard = ui.card().apply {
+  private val other = ui.button("Adicionar PC", ButtonStyle.TONAL, R.drawable.ic_scan_qr_code) { addComputer() }
+  private val currentCard = ui.card().apply {
     addView(ui.row(16).apply {
       addView(FrameLayout(context).apply {
         background = ui.rounded(p.accentSoft, 16f)
@@ -158,6 +158,22 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
     })
     addView(ui.row(8).apply { addView(disconnect, ui.weighted()); addView(reconnect, ui.weighted()); addView(other, ui.weighted()) })
     addView(ui.button("Remover este PC", ButtonStyle.DANGER, R.drawable.ic_trash_2) { confirmForget() }, ui.matchWrap())
+  }
+
+  // The other paired PCs, most recently used first.
+  private val othersList = ui.column(12)
+  private var renderedOthers = emptyList<SavedComputer>()
+  private val othersCard = ui.card(12).apply {
+    addView(ui.cardHeader("Outros PCs", "Conecte a um deles; o atual continua salvo."))
+    addView(othersList, ui.matchWrap())
+  }
+  // Lock, sleep, shut down and restart the PC (power.v1).
+  private val power = PowerPanel(host)
+  /** The current PC, its power actions and, below them, the other PCs. */
+  private val pcCard = ui.column(16).apply {
+    addView(currentCard, ui.matchWrap())
+    addView(power.view, ui.matchWrap())
+    addView(othersCard, ui.matchWrap())
   }
 
   // Preferences and updates.
@@ -208,12 +224,48 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
   }
 
   private fun confirmForget() {
+    val others = state.computers.any { !it.current }
     AlertDialog.Builder(host.activity, dialogTheme(p))
       .setTitle("Remover este PC?")
-      .setMessage("Para remover o acesso também no PC, revogue este celular em Dispositivos.")
+      .setMessage("Para remover o acesso também no PC, revogue este celular em Dispositivos." + if (others) " O PC usado por último passa a ser o atual." else "")
       .setNegativeButton("Cancelar", null)
       .setPositiveButton("Remover") { _, _ -> client.forget() }
       .show()
+  }
+
+  private fun confirmForget(pc: SavedComputer) {
+    AlertDialog.Builder(host.activity, dialogTheme(p))
+      .setTitle("Remover ${pc.name.ifBlank { "este PC" }}?")
+      .setMessage("Para remover o acesso também no PC, revogue este celular em Dispositivos.")
+      .setNegativeButton("Cancelar", null)
+      .setPositiveButton("Remover") { _, _ -> client.forgetComputer(pc.id) }
+      .show()
+  }
+
+  private fun addComputer() {
+    if (state.computers.size >= PcList.MAX) host.notify("Remova um PC para adicionar outro.", Tone.DANGER) else host.openPairingSheet()
+  }
+
+  private fun otherRow(pc: SavedComputer): View = ui.row(12).apply {
+    addView(FrameLayout(context).apply {
+      background = ui.rounded(p.surfaceSunken, 12f)
+      addView(ui.icon(R.drawable.ic_monitor, p.textSecondary, 20), FrameLayout.LayoutParams(ui.dp(20), ui.dp(20), Gravity.CENTER))
+    }, LinearLayout.LayoutParams(ui.dp(40), ui.dp(40)))
+    addView(ui.column(2).apply {
+      addView(ui.text(pc.name.ifBlank { "PC pareado" }, TextStyle.BODY_STRONG).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+      if (pc.os.isNotEmpty()) addView(ui.text(pc.os, TextStyle.CAPTION, p.textSecondary).apply { maxLines = 1 })
+    }, ui.weighted())
+    addView(ui.button("Conectar", ButtonStyle.TONAL) { client.switchComputer(pc.id) })
+    addView(ui.iconButton(R.drawable.ic_trash_2, "Remover ${pc.name.ifBlank { "PC" }}", 44) { confirmForget(pc) })
+  }
+
+  private fun renderOthers(computers: List<SavedComputer>) {
+    val others = computers.filterNot { it.current }
+    othersCard.visibility = if (others.isEmpty()) View.GONE else View.VISIBLE
+    if (others == renderedOthers) return
+    renderedOthers = others
+    othersList.removeAllViews()
+    others.forEach { othersList.addView(otherRow(it), ui.matchWrap()) }
   }
 
   override fun render(state: UiState) {
@@ -242,8 +294,10 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
       disconnect.visibility = if (connected) View.VISIBLE else View.GONE
       reconnect.visibility = if (connected) View.GONE else View.VISIBLE
       reconnect.isEnabled = !waiting
+      renderOthers(state.computers)
     }
 
+    power.render(state)
     realtime.bind(state.preferences.realtime)
     theme.select(host.themeMode)
 
