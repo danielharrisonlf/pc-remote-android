@@ -726,7 +726,7 @@ class RemoteClient(context: Context) : RemoteController {
       if(Build.VERSION.SDK_INT>=33 && app.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) return
       val intent=Intent(app,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
       val pending=PendingIntent.getActivity(app,7,intent,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-      val notification=NotificationCompat.Builder(app,"clipboard").setSmallIcon(R.mipmap.ic_launcher).setContentTitle("Texto recebido do PC").setContentText("Toque para abrir.").setContentIntent(pending).setAutoCancel(true).build()
+      val notification=NotificationCompat.Builder(app,"clipboard").setSmallIcon(R.drawable.ic_pc_remote_notification).setContentTitle("Texto recebido do PC").setContentText("Toque para abrir.").setContentIntent(pending).setAutoCancel(true).build()
       (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(7,notification)
     } catch (_:RuntimeException) { /* Keep the received text in memory for the next foreground visit. */ }
   }

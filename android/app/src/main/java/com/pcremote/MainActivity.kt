@@ -328,6 +328,7 @@ internal class MainActivity : Activity(), ScreenHost {
     connection = ConnectionScreen(this)
     screens = linkedMapOf(
       Tab.TOUCHPAD to TouchpadScreen(this),
+      Tab.CONTROLS to ControlsScreen(this),
       Tab.MEDIA to MediaScreen(this, volumeInteraction),
       Tab.CLIPBOARD to ClipboardScreen(this),
       Tab.CONNECTION to connection,

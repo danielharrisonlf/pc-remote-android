@@ -22,6 +22,7 @@ import android.widget.TextView
 
 internal enum class Tab(val label: String, val icon: Int) {
   TOUCHPAD("Touchpad", R.drawable.ic_touchpad),
+  CONTROLS("Controles", R.drawable.ic_zap),
   MEDIA("Mídia", R.drawable.ic_audio_lines),
   CLIPBOARD("Transferir", R.drawable.ic_clipboard),
   CONNECTION("Conexão", R.drawable.ic_monitor_smartphone),
@@ -45,7 +46,7 @@ internal class TabNavigation(initial: Tab) {
   }
 }
 
-/** Material 3 navigation bar: four destinations with an active pill behind the icon. */
+/** Material 3 navigation bar: five destinations with an active pill behind the icon. */
 internal class NavigationBar(private val ui: Ui, private val onSelect: (Tab) -> Unit) : LinearLayout(ui.context) {
   private class Item(val pill: FrameLayout, val icon: ImageView, val label: TextView, val badge: View, val container: View)
   private val items = HashMap<Tab, Item>()
@@ -62,16 +63,19 @@ internal class NavigationBar(private val ui: Ui, private val onSelect: (Tab) -> 
       val pill = FrameLayout(context).apply {
         background = ui.rounded(Color.TRANSPARENT, 16f)
         addView(icon, FrameLayout.LayoutParams(ui.dp(22), ui.dp(22), Gravity.CENTER))
-        addView(badge, FrameLayout.LayoutParams(ui.dp(10), ui.dp(10), Gravity.TOP or Gravity.END).apply { topMargin = ui.dp(2); marginEnd = ui.dp(14) })
+        addView(badge, FrameLayout.LayoutParams(ui.dp(10), ui.dp(10), Gravity.TOP or Gravity.END).apply { topMargin = ui.dp(2); marginEnd = ui.dp(10) })
       }
-      val label = ui.text(tab.label, TextStyle.CAPTION)
+      val label = ui.text(tab.label, TextStyle.CAPTION).apply {
+        maxLines = 1
+        ellipsize = android.text.TextUtils.TruncateAt.END
+      }
       val container = ui.column(4).apply {
         gravity = Gravity.CENTER
         minimumHeight = ui.dp(80)
         isClickable = true
         contentDescription = tab.label
         background = ui.ripple(null, 0f)
-        addView(pill, LayoutParams(ui.dp(64), ui.dp(32)))
+        addView(pill, LayoutParams(ui.dp(56), ui.dp(32)))
         addView(label, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         setOnClickListener { onSelect(tab) }
       }

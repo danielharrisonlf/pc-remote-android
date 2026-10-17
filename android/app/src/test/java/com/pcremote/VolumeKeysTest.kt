@@ -32,6 +32,7 @@ class VolumeKeysTest {
   @Test fun onlyTouchpadAndMediaTakeTheKeysWhileConnectedWithAudio() {
     assertTrue(VolumeKeys.controlsPc(Tab.TOUCHPAD, resumed = true, connected = true, audio = true, panelOpen = false))
     assertTrue(VolumeKeys.controlsPc(Tab.MEDIA, resumed = true, connected = true, audio = true, panelOpen = false))
+    assertFalse(VolumeKeys.controlsPc(Tab.CONTROLS, resumed = true, connected = true, audio = true, panelOpen = false))
     assertFalse(VolumeKeys.controlsPc(Tab.CLIPBOARD, resumed = true, connected = true, audio = true, panelOpen = false))
     assertFalse(VolumeKeys.controlsPc(Tab.CONNECTION, resumed = true, connected = true, audio = true, panelOpen = false))
     assertFalse(VolumeKeys.controlsPc(Tab.TOUCHPAD, resumed = true, connected = false, audio = true, panelOpen = false))

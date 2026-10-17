@@ -14,6 +14,8 @@ class TabNavigationTest {
 
   @Test fun leavingAndReturningToTheTouchpadKeepsItsTab() {
     val navigation = TabNavigation(Tab.TOUCHPAD)
+    navigation.goTo(Tab.CONTROLS)
+    assertEquals(Tab.CONTROLS, navigation.tab)
     navigation.goTo(Tab.MEDIA)
     navigation.goTo(Tab.CONNECTION)
     navigation.goTo(Tab.TOUCHPAD)
