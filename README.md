@@ -1,15 +1,15 @@
 # PC Remote Android
 
-Versão **0.6.1-kotlin**. Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao desktop Rust/Tauri pela LAN, com protocolo 1 e as extensões `input.v1`, `files.v1`, `files.v2`, `search.v1`, `info.v1`, `power.v1` e `clipboard.v2`.
+Versão **0.6.2-kotlin**. Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao desktop Rust/Tauri pela LAN, com protocolo 1 e as extensões `input.v1`, `files.v1`, `files.v2`, `search.v1`, `info.v1`, `power.v1`, `clipboard.v2`, `wol.v1`, `numpad.v1`, `presentation.v1` e `deck.v1`.
 
 ## Baixar e instalar
 
 | Aplicativo | Download |
 |---|---|
-| Android — APK universal, Android 7/API24+ | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.1-kotlin/pc-remote-android-kotlin-0.6.1-evaluation.apk) |
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.1/pc-remote-desktop-0.6.1-x64-setup.exe) |
+| Android — APK universal, Android 7/API24+ | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.2-kotlin/pc-remote-android-kotlin-0.6.2-evaluation.apk) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.3/pc-remote-desktop-0.6.3-x64-setup.exe) |
 
-As releases dos dois repositórios são públicas. Veja a [release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.1-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.1). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
+As releases dos dois repositórios são públicas. Veja a [release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.2-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.3). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
 
 Instale o `.exe` no PC e abra o APK pelo gerenciador de arquivos do celular, autorizando a fonte quando solicitado. O app aparece como **PC Remote**, pacote `com.pcremote.nativeandroid`. Somente um controlador pode ficar conectado por PC. O uso não requer root, ADB, acessibilidade ou teclado especial.
 
