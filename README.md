@@ -1,21 +1,21 @@
 # PC Remote Android
 
-Versão **0.6.2-kotlin**. Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao desktop Rust/Tauri pela LAN, com protocolo 1 e as extensões `input.v1`, `files.v1`, `files.v2`, `search.v1`, `info.v1`, `power.v1`, `clipboard.v2`, `wol.v1`, `numpad.v1`, `presentation.v1` e `deck.v1`.
+Versão **0.6.3-kotlin**. Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao desktop Rust/Tauri pela LAN, com protocolo 1 e as extensões `input.v1`, `files.v1`, `files.v2`, `search.v1`, `info.v1`, `power.v1`, `clipboard.v2`, `wol.v1`, `numpad.v1`, `presentation.v1` e `deck.v1`.
 
 ## Baixar e instalar
 
 | Aplicativo | Download |
 |---|---|
-| Android — APK universal, Android 7/API24+ | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.2-kotlin/pc-remote-android-kotlin-0.6.2-evaluation.apk) |
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.3/pc-remote-desktop-0.6.3-x64-setup.exe) |
+| Android — APK universal, Android 7/API24+ | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.3-kotlin/pc-remote-android-kotlin-0.6.3-evaluation.apk) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.4/pc-remote-desktop-0.6.4-x64-setup.exe) |
 
-As releases dos dois repositórios são públicas. Veja a [release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.2-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.3). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
+As releases dos dois repositórios são públicas. Veja a [release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.3-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.4). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
 
 Instale o `.exe` no PC e abra o APK pelo gerenciador de arquivos do celular, autorizando a fonte quando solicitado. O app aparece como **PC Remote**, pacote `com.pcremote.nativeandroid`. Somente um controlador pode ficar conectado por PC. O uso não requer root, ADB, acessibilidade ou teclado especial.
 
 ## Tamanho
 
-**APK 0.6.1: 759953 bytes (0.760 MB), cerca de 96.2% menor que os 20.20 MB do antigo app React Native.** Sem R8: 2.635 MB.
+**APK 0.6.3: 723457 bytes (0.723 MB), cerca de 96.4% menor que os 20.20 MB do antigo app React Native.** Sem R8: 2.605 MB.
 
 Veja [SIZE.md](docs/SIZE.md) para bytes exatos, hashes e comparação das builds com e sem R8. O tamanho do download difere do espaço instalado e do consumo de RAM. O scanner QR opcional pode baixar módulos externos do Google Play Services, que não fazem parte do APK.
 
@@ -33,9 +33,11 @@ cd pc-remote-android\android
 
 No Linux/macOS, use `bash gradlew`. Também pode abrir `android` no Android Studio. APK final: `android/app/build/outputs/apk/release/app-release.apk`. Sem as quatro variáveis de assinatura, release usa a chave debug gerada pelo SDK. Para distribuição forneça seu keystore fora do Git. Instruções em [ANDROID.md](docs/ANDROID.md).
 
+**0.6.3-kotlin:** nova aba **Controles** dedicada (Deck de ações, teclado numérico `123` e apresentador de slides), restauração do Touchpad em tela cheia e ícone vetorial adaptativo para tema claro, escuro e ícones temáticos, além de um ícone branco próprio para notificações. Pacote, assinatura, pareamentos, permissões e protocolo são preservados. [Notas da versão](docs/releases/0.6.3-kotlin.md).
+
 ## Interface
 
-Quatro abas: **Touchpad**, **Mídia**, **Transferir** e **Conexão**. Com um PC pareado o app abre no Touchpad; sem PC, na Conexão. A barra superior mostra o PC e o estado da conexão. Conexão mostra só o nome do PC, o estado, o Windows dele e as ações (Desconectar/Reconectar, Adicionar PC, Remover este PC), o cartão **Energia do PC** e, com mais de um PC, **Outros PCs**; as preferências são **Sincronização em tempo real** e o tema (sistema, claro ou escuro). O app não vibra.
+Cinco abas: **Touchpad**, **Controles**, **Mídia**, **Transferir** e **Conexão**. Com um PC pareado o app abre no Touchpad; sem PC, na Conexão. A barra superior mostra o PC e o estado da conexão. **Controles** reúne o Deck de Ações, o Teclado Numérico (`123`) e o Apresentador de Slides. Conexão mostra só o nome do PC, o estado, o Windows dele e as ações (Desconectar/Reconectar, Adicionar PC, Remover este PC), o cartão **Energia do PC** e, com mais de um PC, **Outros PCs**; as preferências são **Sincronização em tempo real** e o tema (sistema, claro ou escuro).
 
 **Vários PCs (0.6.1):** **Adicionar PC** pareia outro PC sem apagar os anteriores, até 8. Os demais ficam em **Outros PCs**, com **Conectar** e a lixeira; com mais de um, tocar no nome do PC na barra superior abre **Trocar de PC**. O celular conecta a um PC por vez.
 
