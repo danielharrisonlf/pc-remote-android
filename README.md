@@ -1,21 +1,21 @@
 # PC Remote Android
 
-Versão **0.6.0-kotlin**. Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao desktop Rust/Tauri pela LAN, com protocolo 1 e as extensões `input.v1`, `files.v1`, `files.v2`, `search.v1` e `info.v1`.
+Versão **0.6.1-kotlin**. Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao desktop Rust/Tauri pela LAN, com protocolo 1 e as extensões `input.v1`, `files.v1`, `files.v2`, `search.v1`, `info.v1`, `power.v1` e `clipboard.v2`.
 
 ## Baixar e instalar
 
 | Aplicativo | Download |
 |---|---|
-| Android — APK universal, Android 7/API24+ | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.0-kotlin/pc-remote-android-kotlin-0.6.0-evaluation.apk) |
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.0/pc-remote-desktop-0.6.0-x64-setup.exe) |
+| Android — APK universal, Android 7/API24+ | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.1-kotlin/pc-remote-android-kotlin-0.6.1-evaluation.apk) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.1/pc-remote-desktop-0.6.1-x64-setup.exe) |
 
-As releases dos dois repositórios são públicas. Veja a [release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.0-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.0). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
+As releases dos dois repositórios são públicas. Veja a [release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.1-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.1). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
 
 Instale o `.exe` no PC e abra o APK pelo gerenciador de arquivos do celular, autorizando a fonte quando solicitado. O app aparece como **PC Remote**, pacote `com.pcremote.nativeandroid`. Somente um controlador pode ficar conectado por PC. O uso não requer root, ADB, acessibilidade ou teclado especial.
 
 ## Tamanho
 
-**APK 0.6.0: 725441 bytes (0.725 MB), cerca de 96.4% menor que os 20.20 MB do antigo app React Native.** Sem R8: 2.587 MB.
+**APK 0.6.1: 759953 bytes (0.760 MB), cerca de 96.2% menor que os 20.20 MB do antigo app React Native.** Sem R8: 2.635 MB.
 
 Veja [SIZE.md](docs/SIZE.md) para bytes exatos, hashes e comparação das builds com e sem R8. O tamanho do download difere do espaço instalado e do consumo de RAM. O scanner QR opcional pode baixar módulos externos do Google Play Services, que não fazem parte do APK.
 
@@ -35,7 +35,13 @@ No Linux/macOS, use `bash gradlew`. Também pode abrir `android` no Android Stud
 
 ## Interface
 
-Quatro abas: **Touchpad**, **Mídia**, **Transferir** e **Conexão**. Com um PC pareado o app abre no Touchpad; sem PC, na Conexão. A barra superior mostra o PC e o estado da conexão. Conexão mostra só o nome do PC, o estado, o Windows dele e as ações (Desconectar/Reconectar, Outro PC, Remover este PC); as preferências são **Sincronização em tempo real** e o tema (sistema, claro ou escuro). O app não vibra.
+Quatro abas: **Touchpad**, **Mídia**, **Transferir** e **Conexão**. Com um PC pareado o app abre no Touchpad; sem PC, na Conexão. A barra superior mostra o PC e o estado da conexão. Conexão mostra só o nome do PC, o estado, o Windows dele e as ações (Desconectar/Reconectar, Adicionar PC, Remover este PC), o cartão **Energia do PC** e, com mais de um PC, **Outros PCs**; as preferências são **Sincronização em tempo real** e o tema (sistema, claro ou escuro). O app não vibra.
+
+**Vários PCs (0.6.1):** **Adicionar PC** pareia outro PC sem apagar os anteriores, até 8. Os demais ficam em **Outros PCs**, com **Conectar** e a lixeira; com mais de um, tocar no nome do PC na barra superior abre **Trocar de PC**. O celular conecta a um PC por vez.
+
+**Energia do PC (0.6.1, com desktop 0.6.1):** **Bloquear** age na hora; **Suspender** e **Desligar** oferecem Agora, 15 min, 30 min, 1 hora e 2 horas; **Reiniciar** pede confirmação. Um agendamento aparece com a hora e o tempo restante, com **Cancelar**, e também pode ser cancelado no PC. Com **Interromper** ativo no PC os botões ficam desabilitados. Desligar e reiniciar não forçam o fechamento de programas no Windows.
+
+**Mídia fora do app (0.6.1):** com o PC tocando e o app aberto, os controles (anterior, tocar/pausar, próxima) aparecem na notificação, na tela de bloqueio e nos controles de mídia do Android, e continuam com o app em segundo plano. **Fechar** os tira até você abrir o app de novo. O widget **Mídia do PC** (tela inicial) e o bloco **Mídia do PC** (Configurações rápidas) controlam o PC atual e conectam na hora do toque, se preciso.
 
 ## Atualizações
 
@@ -48,7 +54,7 @@ A partir da 0.5.0 a atualização acontece dentro do app:
 - Antes de instalar, o app exige que o APK tenha o SHA-256 publicado no `KOTLIN-SHA256SUMS` da mesma release, o mesmo pacote, um versionCode maior e a mesma assinatura do app instalado. O Android confere a assinatura de novo.
 - Na primeira vez, o Android pede para autorizar o PC Remote a **instalar apps desconhecidos** (Permitir desta fonte). No Android 13+ o app também pede, uma vez, permissão de notificações.
 - No Android 12 ou mais novo, depois dessa autorização, as atualizações instalam sem outra confirmação do sistema (nos testes em Android 12 e 13, já na primeira). O app fecha durante a instalação e a notificação **PC Remote atualizado para X** abre a versão nova. Quando o Android pede confirmação (sempre no Android 7 a 11; no 13, numa segunda atualização em menos de 30 segundos), toque em **Atualizar**.
-- A própria 0.5.0 se instala do jeito antigo, uma vez: baixe o APK no navegador e abra-o. Da 0.5.0 para a 0.6.0 a atualização já acontece dentro do app. Pareamentos e preferências são mantidos.
+- A própria 0.5.0 se instala do jeito antigo, uma vez: baixe o APK no navegador e abra-o. Da 0.5.0 em diante a atualização já acontece dentro do app. Pareamentos e preferências são mantidos.
 
 **Ver no GitHub** continua como alternativa, e **Agora não** esconde o aviso daquela versão.
 
@@ -62,11 +68,11 @@ No topo de Mídia, **Pesquisar no YouTube** abre a pesquisa no navegador padrão
 
 **Enviar o que copiei** lê a cópia atual do Android. **Enviar texto** envia o campo, inclusive texto de **Compartilhar → PC Remote**. **Buscar do PC** copia no celular a cópia atual do Windows. Esses envios manuais funcionam com a sincronização desligada.
 
-**Sincronização em tempo real** já vem ligada: o que você copia no PC vai para a área de transferência do celular (também com o app em segundo plano, enquanto a conexão existir), e o que você copia no celular vai para o PC. Desligada em Conexão → Preferências, nada é sincronizado sozinho. Texto fica em RAM, sem histórico persistente ou logs de conteúdo. Limite **64 KiB UTF-8**, preservando Unicode e quebras; NUL/Unicode inválido são recusados. Conteúdo sinalizado sensível é bloqueado; nem todas as senhas podem ser detectadas.
+**Sincronização em tempo real** já vem ligada: o que você copia no PC vai para a área de transferência do celular (também com o app em segundo plano, enquanto a conexão existir), e o que você copia no celular vai para o PC. Desligada em Conexão → Preferências, nada é sincronizado sozinho. Com o desktop 0.6.1, imagens copiadas (um print, "Copiar imagem" no navegador) também vão e vêm, até 32 MB: a do PC chega pronta para colar, e uma imagem copiada em outro app vai ao PC quando você volta ao PC Remote; **Enviar o que copiei** e **Buscar do PC** também levam imagens. Texto fica em RAM, sem histórico persistente ou logs de conteúdo. Limite **64 KiB UTF-8**, preservando Unicode e quebras; NUL/Unicode inválido são recusados. Conteúdo sinalizado sensível é bloqueado; nem todas as senhas podem ser detectadas.
 
 Em **Transferir → Arquivos**, **Enviar arquivo** abre o seletor do Android; também dá para usar **Compartilhar → PC Remote** em qualquer app. Qualquer tipo de até 1 GB, vários de uma vez (fila de até 20, um por vez), com progresso e **Cancelar**. O PC salva em `Downloads\PC Remote`, sem sobrescrever. Arquivos enviados pelo PC chegam sozinhos em `Download/PC Remote` (no Android 7 a 9, na pasta do app); **Recentes** lista os últimos e abre cada um. Durante uma transferência iniciada com o app aberto, uma notificação mostra o progresso e mantém o envio vivo se você trocar de app. Com PC 0.4 ou 0.5, só PNG, JPG e PDF de até 50 MB, do celular para o PC. Arquivos compartilhados sem conexão esperam na fila e saem quando o PC conecta.
 
-Android 10+ restringe leitura do clipboard de outros apps em segundo plano: o que você copiar em outro app vai para o PC quando você voltar ao PC Remote, uma vez. Sem serviço permanente ou garantia de conexão durante suspensão. Eventos que chegam antes da suspensão podem apresentar aviso genérico, quando autorizado. Texto antigo não é reenviado ao parear, reconectar ou ligar a sincronização. Atualizar clipboard não abre links, executa comandos ou cola em apps.
+Android 10+ restringe leitura do clipboard de outros apps em segundo plano: o que você copiar em outro app vai para o PC quando você voltar ao PC Remote, uma vez. Sem serviço permanente (só durante transferências de arquivo e enquanto os controles de mídia aparecem fora do app) nem garantia de conexão durante suspensão. Eventos que chegam antes da suspensão podem apresentar aviso genérico, quando autorizado. Texto antigo não é reenviado ao parear, reconectar ou ligar a sincronização. Atualizar clipboard não abre links, executa comandos ou cola em apps.
 
 ## Touchpad e teclado
 
@@ -74,7 +80,7 @@ Depois do pareamento o touchpad já está pronto, sem ligar nada no PC. Um dedo 
 
 ## Documentação e testes
 
-[Arquitetura](docs/ARCHITECTURE.md), [protocolo](docs/PROTOCOL.md), [testes e pendências](docs/TESTING.md). Contrato e exemplos são idênticos aos do desktop. O app 0.6.0 funciona com desktop 0.2.x a 0.6.0; arquivos de até 1 GB nos dois sentidos, pesquisa e o nome do Windows exigem o desktop 0.6.0; imagens e PDFs exigem o 0.4.0; desktop 0.1.x conserva volume, mídia e clipboard, sem entrada remota.
+[Arquitetura](docs/ARCHITECTURE.md), [protocolo](docs/PROTOCOL.md), [testes e pendências](docs/TESTING.md). Contrato e exemplos são idênticos aos do desktop. O app 0.6.0 funciona com desktop 0.2.x a 0.6.0; arquivos de até 1 GB nos dois sentidos, pesquisa e o nome do Windows exigem o desktop 0.6.0; imagens e PDFs exigem o 0.4.0; desktop 0.1.x conserva volume, mídia e clipboard, sem entrada remota. Na 0.6.1, energia do PC e imagens na área de transferência exigem o desktop 0.6.1; vários PCs e os controles de mídia fora do app funcionam com qualquer desktop compatível.
 
 O [template CI](docs/ci/github-actions.yml) testa Kotlin, executa lint e gera APK sem Node. A credencial GitHub disponível não tem escopo `workflow`; para ativá-lo, publique em `.github/workflows/build.yml` com autenticação apropriada.
 
@@ -91,5 +97,7 @@ A versão 0.4.0 envia imagens e PDFs ao PC, mantém o touchpad ligado ao trocar 
 A versão 0.5.0 baixa, confere e instala as próprias atualizações, com download automático opcional em redes sem limite de dados.
 
 A versão 0.6.0 simplifica a Conexão e as preferências, deixa touchpad e área de transferência prontos após o pareamento, troca arquivos de até 1 GB nos dois sentidos, acrescenta pesquisa e comandos por voz e remove a vibração.
+
+A versão 0.6.1 guarda vários PCs, leva os controles de mídia para a notificação, a tela de bloqueio, um widget e um bloco das Configurações rápidas, bloqueia, suspende, desliga ou reinicia o PC e sincroniza imagens na área de transferência.
 
 A revisão de 15/10/2026 está documentada na [auditoria de segurança](docs/SECURITY-AUDIT.md) e no [relatório de bugs e regressões](docs/BUG-AUDIT-2026-10-15.md), com evidências e limites da validação.

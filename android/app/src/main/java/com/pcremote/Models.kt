@@ -6,7 +6,11 @@ data class MediaSession(val id: String, val app: String, val title: String, val 
 data class InputState(val allowed: Boolean, val enabled: Boolean)
 /** Present only when files.v1 was negotiated. */
 data class FilesState(val allowed: Boolean, val maxBytes: Long)
-data class Snapshot(val revision: Long, val audio: AudioState, val sessions: List<MediaSession>, val clipboardRevision: Long, val input: InputState?, val files: FilesState? = null)
+data class Snapshot(val revision: Long, val audio: AudioState, val sessions: List<MediaSession>, val clipboardRevision: Long, val input: InputState?, val files: FilesState? = null, val power: PowerState? = null)
+/** power.v1: [allowed] is false while Interromper is on in the PC; [scheduled] is the one pending action. */
+data class PowerState(val allowed: Boolean, val scheduled: PowerSchedule?)
+/** [action] is lock, sleep, shutdown or restart; [remainingSeconds] counts from the snapshot. */
+data class PowerSchedule(val action: String, val remainingSeconds: Long)
 /** The only connection preference: clipboard sync in both directions. Manual sends never depend on it. */
 data class Preferences(val realtime: Boolean = true)
 data class DiscoveredComputer(val name: String, val host: String, val port: Int, val id: String = "")
@@ -41,6 +45,16 @@ data class UiState(
     val searchSupported: Boolean = false,
     /** "Windows 11" from info.v1; kept while disconnected. */
     val pcOs: String = "",
+    /** Every paired PC, the current one first (at most PcList.MAX). */
+    val computers: List<SavedComputer> = emptyList(),
+    /** power.control: the PC locks, sleeps, shuts down and restarts on request (power.v1). */
+    val powerSupported: Boolean = false,
+    /** Wall-clock time of the scheduled power action, from the last snapshot; 0 without one. */
+    val powerDeadline: Long = 0L,
+    /** clipboard.image: images on the clipboard go both ways (clipboard.v2). */
+    val clipboardImages: Boolean = false,
+    /** The image from the PC now on the phone clipboard (a file in the app cache), or "". */
+    val receivedImage: String = "",
 )
 sealed interface RemoteAction {
     data object StateGet : RemoteAction
@@ -58,13 +72,18 @@ sealed interface RemoteAction {
     data class KeyboardText(val text: String) : RemoteAction
     data class KeyboardKey(val key: String) : RemoteAction
     /** [twoWay]: files.v2 rules (any type, 1 GB); otherwise files.v1. */
-    data class FileOffer(val transferId: String, val name: String, val size: Long, val mime: String, val twoWay: Boolean = false) : RemoteAction
+    data class FileOffer(val transferId: String, val name: String, val size: Long, val mime: String, val twoWay: Boolean = false, val clipboard: ClipOffer? = null) : RemoteAction
     data class FileCancel(val transferId: String) : RemoteAction
     /** files.v2: refuses a file.push; [code] is storage or unavailable. */
     data class FileDecline(val transferId: String, val code: String) : RemoteAction
     /** search.v1: the PC opens a YouTube search for [query]. */
     data class SearchOpen(val query: String) : RemoteAction
+    /** power.v1: [action] lock, sleep, shutdown or restart, now (0) or in [delaySeconds]. */
+    data class PowerRun(val action: String, val delaySeconds: Int) : RemoteAction
+    data object PowerCancel : RemoteAction
 }
+/** clipboard.v2: the clipboard part of a file.offer; [baseRevision] is the clipboard revision the copy builds on. */
+data class ClipOffer(val eventId: String, val automatic: Boolean, val baseRevision: Long)
 
 interface RemoteController {
     val view: UiState
@@ -79,6 +98,10 @@ interface RemoteController {
     fun disconnect()
     fun forget()
     fun savedAddress(): Pair<String, Int>?
+    /** Makes a saved PC the current one and connects to it. */
+    fun switchComputer(id: String)
+    /** Removes a saved PC; removing the current one moves to the most recently used. */
+    fun forgetComputer(id: String)
     fun startDiscovery()
     fun stopDiscovery()
     fun execute(action: RemoteAction, completion: (String?) -> Unit = {})

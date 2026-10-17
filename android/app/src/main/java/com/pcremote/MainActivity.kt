@@ -98,6 +98,7 @@ internal class MainActivity : Activity(), ScreenHost {
     // A recreated Activity or a launch from Recents carries an old share: it was already handled.
     val freshShare = savedInstanceState == null && intent?.let { isShare(it) && it.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0 } == true
     if (freshShare) navigation.goTo(Tab.CLIPBOARD)
+    if (savedInstanceState == null) requestedTab(intent)?.let(navigation::goTo)
     buildUi()
     if (freshShare) remote.receiveShare(intent)
     unsubscribe = remote.observe { next ->
@@ -181,11 +182,16 @@ internal class MainActivity : Activity(), ScreenHost {
     setIntent(intent)
     remote.receiveShare(intent)
     navigation.newIntent(shared = isShare(intent))
+    requestedTab(intent)?.let(navigation::goTo)
     volumeInteraction.finish()
     render()
   }
 
   private fun isShare(intent: Intent) = intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE
+
+  /** The media notification and the widget open Mídia. */
+  private fun requestedTab(intent: Intent?): Tab? =
+    intent?.getStringExtra(MediaControlService.EXTRA_TAB)?.let { name -> Tab.entries.firstOrNull { it.name == name } }
 
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
     if (requestCode != PICK_FILES) { super.onActivityResult(requestCode, resultCode, data); return }
@@ -276,7 +282,14 @@ internal class MainActivity : Activity(), ScreenHost {
     window.navigationBarColor = p.surface
 
     statusChip = kit.chip()
-    title = kit.text("PC Remote", TextStyle.TITLE).apply { maxLines = 1; accessibilityHeading() }
+    title = kit.text("PC Remote", TextStyle.TITLE).apply {
+      maxLines = 1
+      ellipsize = android.text.TextUtils.TruncateAt.END
+      accessibilityHeading()
+      compoundDrawablePadding = kit.dp(4)
+      // With more than one paired PC, the name opens the PC switcher.
+      setOnClickListener { if (state.computers.size > 1) openComputerSwitcher() }
+    }
     // The theme lives in Conexão → Preferências; the bar keeps only the PC and its state.
     topBar = kit.row(8).apply {
       setPadding(kit.dp(20), kit.dp(12), kit.dp(8), kit.dp(12))
@@ -377,6 +390,10 @@ internal class MainActivity : Activity(), ScreenHost {
     val (tone, label) = statusTone(state.status)
     statusChip.set(tone, label)
     title.text = state.pcName.ifBlank { "PC Remote" }
+    val switchable = state.computers.size > 1
+    title.isClickable = switchable
+    title.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, if (switchable) kit.drawable(R.drawable.ic_chevron_down, kit.palette.textSecondary, 18) else null, null)
+    title.contentDescription = if (switchable) "${title.text}, trocar de PC" else null
 
     val notify = updateState.notify
     banner.visibility = if (notify) View.VISIBLE else View.GONE
@@ -485,8 +502,35 @@ internal class MainActivity : Activity(), ScreenHost {
     }
   }
 
+  /** The paired PCs; a tap makes one current and connects to it. */
+  private fun openComputerSwitcher() {
+    val p = kit.palette
+    val sheet = Sheet(this, kit, "Trocar de PC", "O celular conecta a um PC por vez.")
+    state.computers.forEach { pc ->
+      sheet.body.addView(kit.row(12).apply {
+        minimumHeight = kit.dp(56)
+        background = kit.ripple(kit.rounded(if (pc.current) p.accentSoft else p.surfaceSunken, 14f), 14f)
+        setPadding(kit.dp(14), kit.dp(10), kit.dp(14), kit.dp(10))
+        isClickable = true
+        contentDescription = if (pc.current) "${pc.name}, PC atual" else pc.name
+        setOnClickListener { sheet.dismiss(); if (!pc.current) remote.switchComputer(pc.id) }
+        addView(kit.icon(R.drawable.ic_monitor, if (pc.current) p.accentText else p.textSecondary, 22), LinearLayout.LayoutParams(kit.dp(22), kit.dp(22)))
+        addView(kit.column(2).apply {
+          addView(kit.text(pc.name.ifBlank { "PC pareado" }, TextStyle.BODY_STRONG).apply { maxLines = 1 })
+          if (pc.os.isNotEmpty()) addView(kit.text(pc.os, TextStyle.CAPTION, p.textSecondary))
+        }, kit.weighted())
+        if (pc.current) addView(kit.icon(R.drawable.ic_check, p.accentText, 20), LinearLayout.LayoutParams(kit.dp(20), kit.dp(20)))
+      }, kit.matchWrap())
+    }
+    sheet.footer.addView(kit.button("Adicionar PC", ButtonStyle.OUTLINED, R.drawable.ic_scan_qr_code) {
+      sheet.dismiss()
+      if (state.computers.size >= PcList.MAX) snackbar.show("Remova um PC para adicionar outro.", Tone.DANGER) else openPairingSheet()
+    }, kit.weighted())
+    sheet.show()
+  }
+
   override fun openPairingSheet() {
-    val sheet = Sheet(this, kit, "Parear outro PC", "O PC atual continua salvo até o PC novo aprovar.")
+    val sheet = Sheet(this, kit, "Adicionar PC", "Os PCs já pareados continuam salvos.")
     val panel = PairingPanel(this) { hideKeyboard(); sheet.dismiss() }
     sheet.body.addView(panel.view)
     sheet.dialog.setOnDismissListener { if (pairingSheet === sheet) { pairingSheet = null; pairingPanel = null } }

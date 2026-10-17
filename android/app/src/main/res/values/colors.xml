@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget colors; the same roles as Palette in Theme.kt. The launcher picks values-night by itself. -->
+<resources>
+  <color name="widget_background">#FFFFFFFF</color>
+  <color name="widget_text">#FF0F172A</color>
+  <color name="widget_text_secondary">#FF4B5866</color>
+  <color name="widget_accent">#FF4F50D6</color>
+</resources>

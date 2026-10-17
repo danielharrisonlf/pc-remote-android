@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">PC Remote</string>
+    <string name="media_label">Mídia do PC</string>
+    <string name="widget_idle">Toque ⏯ para conectar</string>
+    <string name="widget_previous">Faixa anterior</string>
+    <string name="widget_play">Tocar ou pausar no PC</string>
+    <string name="widget_next">Próxima faixa</string>
 </resources>
