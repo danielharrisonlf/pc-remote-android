@@ -55,6 +55,12 @@ data class UiState(
     val clipboardImages: Boolean = false,
     /** The image from the PC now on the phone clipboard (a file in the app cache), or "". */
     val receivedImage: String = "",
+    /** input.numpad: the PC handles dedicated numpad keys (numpad.v1). */
+    val numpadSupported: Boolean = false,
+    /** presentation.control: the PC handles presentation commands (presentation.v1). */
+    val presentationSupported: Boolean = false,
+    /** deck.control: the PC handles quick deck triggers (deck.v1). */
+    val deckSupported: Boolean = false,
 )
 sealed interface RemoteAction {
     data object StateGet : RemoteAction
@@ -71,6 +77,10 @@ sealed interface RemoteAction {
     data class PointerScroll(val steps: Int) : RemoteAction
     data class KeyboardText(val text: String) : RemoteAction
     data class KeyboardKey(val key: String) : RemoteAction
+    /** presentation.v1: [command] start, start_current, stop, next, previous, blackout or whiteout. */
+    data class PresentationControl(val command: String) : RemoteAction
+    /** deck.v1: [id] show_desktop, task_view, switch_window, close_window, screenshot, fullscreen, lock_pc, calculator, downloads, browser, task_manager or emoji_picker. */
+    data class DeckTrigger(val id: String) : RemoteAction
     /** [twoWay]: files.v2 rules (any type, 1 GB); otherwise files.v1. */
     data class FileOffer(val transferId: String, val name: String, val size: Long, val mime: String, val twoWay: Boolean = false, val clipboard: ClipOffer? = null) : RemoteAction
     data class FileCancel(val transferId: String) : RemoteAction
@@ -102,6 +112,8 @@ interface RemoteController {
     fun switchComputer(id: String)
     /** Removes a saved PC; removing the current one moves to the most recently used. */
     fun forgetComputer(id: String)
+    /** Sends Wake-on-LAN magic packets to the saved PC ([id], or the current one when null). */
+    fun wakeComputer(id: String? = null, completion: (String?) -> Unit = {})
     fun startDiscovery()
     fun stopDiscovery()
     fun execute(action: RemoteAction, completion: (String?) -> Unit = {})

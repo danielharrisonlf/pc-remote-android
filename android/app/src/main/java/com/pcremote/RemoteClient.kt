@@ -68,6 +68,7 @@ class RemoteClient(context: Context) : RemoteController {
   private var pairId: String? = null
   private var helloId: String? = null
   private var attempt = 0
+  private var pointerSeq = 0L
   private var reconnectTask: Runnable? = null
   private val pending = LinkedHashMap<String, Pending>()
   private data class Pending(val completion:(String?,String?)->Unit,val timeout:Runnable,val generation:Int)
@@ -235,7 +236,7 @@ class RemoteClient(context: Context) : RemoteController {
     val e=endpoint ?: return
     reconnectTask?.let(main::removeCallbacks); reconnectTask=null
     generation++; val own=generation; retireClipboard(); authenticated=false; clearDisarm(); inputIntent.clear(); dropInput(); rejectPending(); files.connectionEnded(); receiver.connectionEnded()
-    patch { it.copy(status=if(reconnecting) "Reconectando" else "Conectando",snapshot=null,inputSupported=false,filesSupported=false,filesTwoWay=false,searchSupported=false) }
+    patch { it.copy(status=if(reconnecting) "Reconectando" else "Conectando",snapshot=null,inputSupported=false,numpadSupported=false,presentationSupported=false,deckSupported=false,filesSupported=false,filesTwoWay=false,searchSupported=false) }
     // Only a code pairing starts without a pinned identity; every other connection pins.
     val firstUse=e.fingerprint.isEmpty() && pairCode!=null
     if(e.fingerprint.isEmpty() && !firstUse) { fail("Pareie este PC de novo."); lost(own); return }
@@ -297,6 +298,7 @@ class RemoteClient(context: Context) : RemoteController {
       }
       is Incoming.Welcome -> {
         if(helloId!=msg.id || endpoint?.pcId!=msg.pcId || endpoint?.token.isNullOrBlank()) { ws.close(1002,null); return }
+        if(msg.macs.isNotEmpty()) endpoint=endpoint?.copy(macs=msg.macs)
         if(pairingHandshake && !store.canAdd(PcList.key(endpoint!!))) { close(true); restoreFailedPair(); patch { it.copy(status="Desconectado",error="Este celular já guarda ${PcList.MAX} PCs. Remova um em Conexão para adicionar outro.",snapshot=null) }; return }
         if(pairingHandshake) try { store.persist(endpoint!!) } catch (_:Exception) {
           close(true)
@@ -312,11 +314,11 @@ class RemoteClient(context: Context) : RemoteController {
         dropInput()
         // An address found by discovery is kept for the next start; failing to save it changes nothing now.
         if(!wasPairing) endpoint?.let { e -> store.restore()?.takeIf { it.token==e.token && (it.host!=e.host || it.port!=e.port) }?.let { try { store.persist(e) } catch (_:Exception) {} } }
-        try { store.touch(msg.pcId,msg.pcName,msg.os) } catch (_:Exception) {}; publishComputers()
+        try { store.touch(msg.pcId,msg.pcName,msg.os,msg.macs) } catch (_:Exception) {}; publishComputers()
         // The copy made while disconnected waits for the first snapshot, whose revision it must build on.
         uploadAfterState=pendingUpload; pendingUpload=null
         if(hasFocus()) clipboardTracker.baseline(readLocalKey()) else clipboardTracker.suspend()
-        patch { it.copy(status="Conectado",error="",pcName=msg.pcName,pcOs=msg.os,snapshot=null,receivedText="",inputSupported=msg.input,filesSupported=msg.files,filesTwoWay=msg.files && msg.fileReceive,searchSupported=msg.search,draggingVolume=null) }
+        patch { it.copy(status="Conectado",error="",pcName=msg.pcName,pcOs=msg.os,snapshot=null,receivedText="",inputSupported=msg.input,numpadSupported=msg.input && msg.numpad,presentationSupported=msg.input && msg.presentation,deckSupported=msg.input && msg.deck,filesSupported=msg.files,filesTwoWay=msg.files && msg.fileReceive,searchSupported=msg.search,draggingVolume=null) }
         patch { it.copy(powerSupported=msg.power,clipboardImages=msg.clipboardImage && msg.files && msg.fileReceive) }
         request(RemoteAction.StateGet) {}; sendSync(); files.connected()
       }
@@ -348,7 +350,7 @@ class RemoteClient(context: Context) : RemoteController {
     if(pairingHandshake) restoreFailedPair()
     pairCode=null; pairId=null
     helloId=null; authenticated=false; clearDisarm(); socket?.cancel(); socket=null; client?.dispatcher?.executorService?.shutdown(); client=null; inputIntent.clear(); dropInput(); rejectPending(); files.connectionEnded(); receiver.connectionEnded(); volumeTask?.let(main::removeCallbacks); volumeTask=null; finalVolumeTimeout?.let(main::removeCallbacks); finalVolumeTimeout=null; finalVolume=null
-    patch { it.copy(status="Desconectado",snapshot=null,inputSupported=false,filesSupported=false,filesTwoWay=false,searchSupported=false,draggingVolume=null) }
+    patch { it.copy(status="Desconectado",snapshot=null,inputSupported=false,numpadSupported=false,presentationSupported=false,deckSupported=false,filesSupported=false,filesTwoWay=false,searchSupported=false,draggingVolume=null) }
     if(requestedDisconnect || (!foreground && !keepAlive) || endpoint?.token.isNullOrBlank()) return
     val delay=intArrayOf(1,2,4,8,16,30)[attempt.coerceAtMost(5)]*1000L+SecureRandom().nextInt(500)
     val retired=generation
@@ -362,21 +364,26 @@ class RemoteClient(context: Context) : RemoteController {
     val body=Protocol.action(action)
     if(body==null) { completion("Comando inválido.",null); return null }
     if(!authenticated || socket==null) { completion("Computador desconectado.",null); return null }
-    val input=action is RemoteAction.InputEnable || action is RemoteAction.PointerMove || action is RemoteAction.PointerClick || action is RemoteAction.PointerScroll || action is RemoteAction.KeyboardText || action is RemoteAction.KeyboardKey
+    val input=action is RemoteAction.InputEnable || action is RemoteAction.PointerMove || action is RemoteAction.PointerClick || action is RemoteAction.PointerScroll || action is RemoteAction.KeyboardText || action is RemoteAction.KeyboardKey || action is RemoteAction.PresentationControl || action is RemoteAction.DeckTrigger
     val disable=action is RemoteAction.InputEnable && !action.enabled
     if(input && (!view.inputSupported || (!disable && !foreground))) { completion("Controle de entrada indisponível.",null); return null }
     if(action is RemoteAction.InputEnable && action.enabled && (!hasFocus() || view.snapshot?.input?.allowed!=true)) { completion("Controle de entrada não autorizado pelo PC.",null); return null }
     if(input && !disable && action !is RemoteAction.InputEnable && !canInput()) { completion("Ative o controle de entrada no PC e no celular.",null); return null }
+    if(action is RemoteAction.KeyboardKey && action.key in Protocol.numpadKeys && !view.numpadSupported) { completion("Atualize o PC Remote no PC para usar o teclado numérico.",null); return null }
+    if(action is RemoteAction.PresentationControl && !view.presentationSupported) { completion("Atualize o PC Remote no PC para usar o apresentador.",null); return null }
+    if(action is RemoteAction.DeckTrigger && !view.deckSupported) { completion("Atualize o PC Remote no PC para usar o Deck de Ações.",null); return null }
     if(action is RemoteAction.ClipboardSet && action.automatic && (!hasFocus() || !view.preferences.realtime)) { completion("Envio automático está desativado.",null); return null }
     if((action is RemoteAction.FileOffer || action is RemoteAction.FileCancel) && !view.filesSupported) { completion("Atualize o PC Remote no Windows para enviar arquivos.",null); return null }
     if(action is RemoteAction.FileDecline && !view.filesTwoWay) { completion("Atualize o PC Remote no Windows para receber arquivos.",null); return null }
     if(action is RemoteAction.SearchOpen && !view.searchSupported) { completion("Atualize o PC Remote no Windows para pesquisar.",null); return null }
     if((action is RemoteAction.PowerRun || action is RemoteAction.PowerCancel) && !view.powerSupported) { completion("Atualize o PC Remote no Windows para controlar a energia.",null); return null }
     if(action is RemoteAction.FileOffer && action.clipboard!=null && (!view.clipboardImages || (action.clipboard.automatic && !view.preferences.realtime))) { completion("Envio automático está desativado.",null); return null }
-    val id=UUID.randomUUID().toString(); val frame=JSONObject().put("v",1).put("type","request").put("id",id).put("action",body).toString()
+    val continuousPointer = action is RemoteAction.PointerMove || action is RemoteAction.PointerScroll
+    val id = if(continuousPointer) { pointerSeq = (pointerSeq + 1L) and 0xFFFF_FFFF_FFFFL; "00000000-0000-4000-8000-%012x".format(pointerSeq) } else UUID.randomUUID().toString()
+    val frame=JSONObject().put("v",1).put("type","request").put("id",id).put("action",body).toString()
     if(frame.toByteArray(Charsets.UTF_8).size>Protocol.MAX_FRAME) { completion("Comando muito grande.",null); return null }
     val own=generation; val timeout=Runnable { pending.remove(id)?.completion?.invoke("O PC não confirmou a ação a tempo.",null) }
-    pending[id]=Pending(completion,timeout,own); main.postDelayed(timeout,8000)
+    pending[id]=Pending(completion,timeout,own); main.postDelayed(timeout,if(continuousPointer) 2000L else 8000L)
     if(socket?.send(frame)!=true) { complete(id,"Conexão interrompida.",null); return null }
     return id
   }
@@ -390,7 +397,7 @@ class RemoteClient(context: Context) : RemoteController {
       send(action) { error,code -> completion(if(code=="unavailable") "O player não aceitou o comando." else error) }
       return@run
     }
-    if(action is RemoteAction.PointerClick || action is RemoteAction.PointerScroll || action is RemoteAction.KeyboardText || action is RemoteAction.KeyboardKey) {
+    if(action is RemoteAction.PointerClick || action is RemoteAction.PointerScroll || action is RemoteAction.KeyboardText || action is RemoteAction.KeyboardKey || action is RemoteAction.PresentationControl || action is RemoteAction.DeckTrigger) {
       if(discretePending) { completion("Aguarde a confirmação do controle anterior."); return@run }
       discretePending=true; val own=inputGeneration
       request(action) { e -> if(own==inputGeneration) discretePending=false; completion(if(own!=inputGeneration) "Controle interrompido." else e) }
@@ -853,10 +860,26 @@ class RemoteClient(context: Context) : RemoteController {
     try { store.remove(id) } catch (_:Exception) { fail("Não foi possível remover o PC. Tente novamente."); return@run }
     publishComputers()
   }
+  override fun wakeComputer(id:String?,completion:(String?)->Unit) = run {
+    val target=if(id==null) (endpoint ?: store.restore()) else store.computer(id)
+    if(target==null) { completion("Nenhum PC salvo para ligar."); return@run }
+    val macs=target.macs.ifEmpty { store.computer(PcList.key(target))?.macs.orEmpty() }
+    val host=target.host
+    Thread {
+      val err=WakeOnLan.send(macs,host)
+      main.post {
+        if(err==null && (id==null || id==store.restore()?.let(PcList::key))) {
+          requestedDisconnect=false
+          autoReconnect()
+        }
+        completion(err)
+      }
+    }.start()
+  }
 
   private companion object {
     /** One header line each; see PROTOCOL.md for what each extension adds. */
-    val FEATURES=listOf("input.v1","files.v1","files.v2","search.v1","info.v1","power.v1","clipboard.v2")
+    val FEATURES=listOf("input.v1","files.v1","files.v2","search.v1","info.v1","power.v1","clipboard.v2","wol.v1","numpad.v1","presentation.v1","deck.v1")
     /** After sleep, shutdown or restart now, a dropped connection is what the user asked for. */
     const val POWER_OFF_MS=120_000L
     /** Smaller files finish before a foreground service would help. */

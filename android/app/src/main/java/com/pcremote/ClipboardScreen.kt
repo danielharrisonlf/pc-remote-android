@@ -100,10 +100,8 @@ internal class ClipboardScreen(private val host: ScreenHost) : Screen {
     maxHeight = ui.dp(220)
     contentDescription = "Imagem recebida do PC"
   }
-  private val imageCaption = ui.text("Imagem do PC copiada no celular.", TextStyle.CAPTION, p.textSecondary)
   private val imageBox = ui.column(8).apply {
     addView(imagePreview, ui.matchWrap())
-    addView(imageCaption)
   }
   private var shownImage = ""
   private val nothing = ui.text("Nada recebido nesta conexão.", TextStyle.BODY, p.textSecondary)
@@ -123,7 +121,6 @@ internal class ClipboardScreen(private val host: ScreenHost) : Screen {
     gravity = Gravity.TOP or Gravity.START
     addTextChangedListener(SimpleWatcher { updateSendButtons() })
   }
-  private val sharedHint = ui.text("Texto compartilhado. Revise e envie.", TextStyle.CAPTION, p.success)
   private val sendDraft = ui.button("Enviar texto", ButtonStyle.FILLED, R.drawable.ic_send) {
     client.sendClipboard(draft.text.toString()) { error ->
       if (error == null) draft.setText("")
@@ -139,7 +136,6 @@ internal class ClipboardScreen(private val host: ScreenHost) : Screen {
   private val sendCard = ui.card().apply {
     addView(ui.cardHeader("Enviar texto ao PC"))
     addView(draft, ui.matchWrap())
-    addView(sharedHint)
     addView(ui.row(8).apply { addView(sendDraft, ui.weighted()); addView(sendCopied, ui.weighted()) })
     addView(fetch, ui.matchWrap())
   }
@@ -228,7 +224,6 @@ internal class ClipboardScreen(private val host: ScreenHost) : Screen {
       lastShared = state.sharedText
     }
     if (state.sharedText.isEmpty()) lastShared = ""
-    sharedHint.visibility = if (state.sharedText.isNotEmpty()) View.VISIBLE else View.GONE
     updateSendButtons()
     sendCopied.isEnabled = connected
     fetch.isEnabled = connected
@@ -260,9 +255,10 @@ internal class ClipboardScreen(private val host: ScreenHost) : Screen {
     val connected = state.status == "Conectado"
     val allowed = state.snapshot?.files?.allowed
     val ready = connected && state.filesSupported && allowed == true
-    filesSubtitle.text = when {
-      connected && state.filesSupported && !state.filesTwoWay -> "Este PC aceita PNG, JPG ou PDF de até 50 MB. Atualize o PC Remote no Windows para qualquer arquivo de até 1 GB, nos dois sentidos."
-      else -> "Até 1 GB por arquivo, nos dois sentidos. Ficam em Downloads\\PC Remote no PC e Download/PC Remote no celular."
+    val legacyFiles = connected && state.filesSupported && !state.filesTwoWay
+    filesSubtitle.visibility = if (legacyFiles) View.VISIBLE else View.GONE
+    if (legacyFiles) {
+      filesSubtitle.text = "PNG, JPG ou PDF de até 50 MB. Atualize o PC para qualquer arquivo."
     }
     // Old PCs never advertise file.transfer, so nothing here sends a request to them.
     val block = when {

@@ -75,4 +75,13 @@ class PcListTest {
     assertEquals("fp:" + legacy.fingerprint, list.currentId)
     assertEquals(legacy, list.current!!.computer)
   }
+
+  @Test fun touchAndUpsertPreserveLearnedMacAddresses() {
+    val list = PcList().upsert(pc(1), 10)!!.touch("pc-1", "PC 1", "Windows 11", 20, listOf("a4:b1:c2:d3:e4:f5"))
+    assertEquals(listOf("a4:b1:c2:d3:e4:f5"), list.computers().single().macs)
+    val roundTrip = PcList.fromJson(list.toJson())!!
+    assertEquals(listOf("a4:b1:c2:d3:e4:f5"), roundTrip.computers().single().macs)
+    val rePaired = roundTrip.upsert(pc(1, token = "novo"), 30)!!
+    assertEquals(listOf("a4:b1:c2:d3:e4:f5"), rePaired.computers().single().macs)
+  }
 }

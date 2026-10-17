@@ -223,6 +223,13 @@ internal class MainActivity : Activity(), ScreenHost {
   override fun dispatchKeyEvent(event: KeyEvent): Boolean {
     val code = event.keyCode
     if (code != KeyEvent.KEYCODE_VOLUME_UP && code != KeyEvent.KEYCODE_VOLUME_DOWN && code != KeyEvent.KEYCODE_VOLUME_MUTE) return super.dispatchKeyEvent(event)
+    val currentScreen = if (::screens.isInitialized) screens[navigation.tab] else null
+    if (resumed && (code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN) && currentScreen?.interceptsVolumeKeys() == true) {
+      if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+        currentScreen.onVolumeKey(code == KeyEvent.KEYCODE_VOLUME_UP)
+      }
+      return true
+    }
     if (!VolumeKeys.controlsPc(navigation.tab, resumed, state.status == "Conectado", state.snapshot?.audio?.available == true, panels.isOpen)) return super.dispatchKeyEvent(event)
     if (event.action == KeyEvent.ACTION_DOWN) volumeKey(code, event.repeatCount)
     return true // Both down and up: the phone's own volume and panel must not react.

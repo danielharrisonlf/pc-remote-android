@@ -10,7 +10,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.spec.GCMParameterSpec
 import org.json.JSONObject
 
-internal data class PairedComputer(val host: String, val port: Int, val fingerprint: String, val deviceId: String, val deviceName: String, val pcId: String = "", val pcName: String = "", val token: String = "")
+internal data class PairedComputer(val host: String, val port: Int, val fingerprint: String, val deviceId: String, val deviceName: String, val pcId: String = "", val pcName: String = "", val token: String = "", val macs: List<String> = emptyList())
 
 /**
  * The paired PCs (PcList), encrypted with a Keystore AES-GCM key. Versions up to
@@ -77,12 +77,13 @@ internal class CredentialStore(private val prefs: SharedPreferences, private val
     save(list().upsert(e, now()) ?: throw IllegalStateException("full"))
   }
   fun select(id: String) = save(list().select(id, now()))
-  /** Name and Windows edition from the welcome; the PC counts as just used. */
-  fun touch(id: String, name: String, os: String) {
+  /** Name, OS edition and MAC addresses from the welcome; the PC counts as just used. */
+  fun touch(id: String, name: String, os: String, macs: List<String> = emptyList()) {
     val current = list()
     val entry = current.entries.firstOrNull { PcList.key(it.computer) == id } ?: return
-    if (entry.computer.pcName == name && entry.os == os && now() - entry.lastUsed < TOUCH_INTERVAL_MS) return
-    save(current.touch(id, name, os, now()))
+    val macsChanged = macs.isNotEmpty() && macs != entry.computer.macs
+    if (!macsChanged && entry.computer.pcName == name && entry.os == os && now() - entry.lastUsed < TOUCH_INTERVAL_MS) return
+    save(current.touch(id, name, os, now(), macs))
   }
   fun remove(id: String) = save(list().remove(id))
   /** Removes the current PC; the most recently used of the others becomes current. */

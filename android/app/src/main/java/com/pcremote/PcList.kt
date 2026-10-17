@@ -4,7 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** A paired PC as the Conexão screen lists it; [id] is the PC's pcId. */
-data class SavedComputer(val id: String, val name: String, val os: String, val current: Boolean)
+data class SavedComputer(val id: String, val name: String, val os: String, val current: Boolean, val macs: List<String> = emptyList())
 
 /** One saved pairing: credentials, the Windows name from info.v1 and when it was last used. */
 internal data class PcEntry(val computer: PairedComputer, val os: String = "", val lastUsed: Long = 0)
@@ -26,16 +26,22 @@ internal data class PcList(val entries: List<PcEntry> = emptyList(), val current
     val id = key(computer)
     if (!canAdd(id)) return null
     val old = entries.firstOrNull { key(it.computer) == id }
-    val entry = PcEntry(computer, old?.os.orEmpty(), now)
+    val merged = if (computer.macs.isEmpty() && old != null) computer.copy(macs = old.computer.macs) else computer
+    val entry = PcEntry(merged, old?.os.orEmpty(), now)
     return PcList(if (old == null) entries + entry else entries.map { if (it === old) entry else it }, id)
   }
 
   fun select(id: String, now: Long): PcList =
     if (!has(id)) this else PcList(entries.map { if (key(it.computer) == id) it.copy(lastUsed = now) else it }, id)
 
-  /** Name and Windows edition from a welcome; [now] marks the PC as just used. */
-  fun touch(id: String, name: String, os: String, now: Long): PcList =
-    PcList(entries.map { if (key(it.computer) == id) it.copy(computer = it.computer.copy(pcName = name), os = os, lastUsed = now) else it }, currentId)
+  /** Name, OS edition and MAC addresses from a welcome; [now] marks the PC as just used. */
+  fun touch(id: String, name: String, os: String, now: Long, macs: List<String> = emptyList()): PcList =
+    PcList(entries.map {
+      if (key(it.computer) == id) {
+        val nextMacs = if (macs.isNotEmpty()) macs else it.computer.macs
+        it.copy(computer = it.computer.copy(pcName = name, macs = nextMacs), os = os, lastUsed = now)
+      } else it
+    }, currentId)
 
   /** Removing the current PC makes the most recently used of the others current. */
   fun remove(id: String): PcList {
@@ -48,15 +54,17 @@ internal data class PcList(val entries: List<PcEntry> = emptyList(), val current
   /** The current PC first, then the others from the most recently used. */
   fun computers(): List<SavedComputer> = entries
     .sortedWith(compareByDescending<PcEntry> { key(it.computer) == currentId }.thenByDescending { it.lastUsed })
-    .map { SavedComputer(key(it.computer), it.computer.pcName, it.os, key(it.computer) == currentId) }
+    .map { SavedComputer(key(it.computer), it.computer.pcName, it.os, key(it.computer) == currentId, it.computer.macs) }
 
   fun toJson(): String {
     val pcs = JSONArray()
     entries.forEach { e ->
       val c = e.computer
-      pcs.put(JSONObject().put("host", c.host).put("port", c.port).put("fingerprint", c.fingerprint)
+      val o = JSONObject().put("host", c.host).put("port", c.port).put("fingerprint", c.fingerprint)
         .put("deviceId", c.deviceId).put("deviceName", c.deviceName).put("pcId", c.pcId).put("pcName", c.pcName)
-        .put("token", c.token).put("os", e.os).put("lastUsed", e.lastUsed))
+        .put("token", c.token).put("os", e.os).put("lastUsed", e.lastUsed)
+      if (c.macs.isNotEmpty()) o.put("macs", JSONArray(c.macs))
+      pcs.put(o)
     }
     return JSONObject().put("v", 1).put("current", currentId).put("pcs", pcs).toString()
   }
@@ -74,8 +82,13 @@ internal data class PcList(val entries: List<PcEntry> = emptyList(), val current
         val pcs = o.getJSONArray("pcs")
         val entries = (0 until pcs.length()).map { i ->
           val p = pcs.getJSONObject(i)
+          val macArr = p.optJSONArray("macs")
+          val macs = if (macArr == null) emptyList() else (0 until macArr.length())
+            .mapNotNull { idx -> macArr.optString(idx).lowercase().takeIf { Protocol.macPattern.matches(it) } }
+            .distinct()
+            .take(8)
           PcEntry(PairedComputer(p.getString("host"), p.getInt("port"), p.getString("fingerprint"), p.getString("deviceId"), p.getString("deviceName"),
-            p.getString("pcId"), p.getString("pcName"), p.getString("token")), p.optString("os"), p.optLong("lastUsed"))
+            p.getString("pcId"), p.getString("pcName"), p.getString("token"), macs), p.optString("os"), p.optLong("lastUsed"))
         }.distinctBy { key(it.computer) }.take(MAX)
         val current = o.optString("current")
         PcList(entries, if (entries.any { key(it.computer) == current }) current else entries.maxByOrNull { it.lastUsed }?.let { key(it.computer) }.orEmpty())

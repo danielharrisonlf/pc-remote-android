@@ -266,4 +266,29 @@ class ProtocolTest {
       assertEquals(m.toString().length,built.length)
     }
   }
+
+  @Test fun wolNumpadPresentationAndDeckExtensionsAreStrict() {
+    val welcome="""{"v":1,"type":"welcome","id":"$id","pcId":"$id","pcName":"PC","capabilities":["audio","input.control","input.numpad","presentation.control","deck.control","wol.target"],"os":"Ubuntu 24.04 LTS","macs":["a4:b1:c2:d3:e4:f5"]}"""
+    val parsed=Protocol.parse(welcome) as Incoming.Welcome
+    assertTrue(parsed.input && parsed.numpad && parsed.presentation && parsed.deck)
+    assertEquals(listOf("a4:b1:c2:d3:e4:f5"),parsed.macs)
+    assertNull(Protocol.parse(welcome.replace("a4:b1:c2:d3:e4:f5","not-a-mac")))
+
+    assertEquals("numpad_enter",Protocol.action(RemoteAction.KeyboardKey("numpad_enter"))!!.getString("key"))
+    assertEquals("next",Protocol.action(RemoteAction.PresentationControl("next"))!!.getString("command"))
+    assertNull(Protocol.action(RemoteAction.PresentationControl("laser")))
+    assertEquals("show_desktop",Protocol.action(RemoteAction.DeckTrigger("show_desktop"))!!.getString("id"))
+    assertNull(Protocol.action(RemoteAction.DeckTrigger("format_disk")))
+
+    val magic=WakeOnLan.buildMagicPacket("a4:b1:c2:d3:e4:f5")!!
+    assertEquals(102,magic.size)
+    for (i in 0 until 6) assertEquals(0xFF.toByte(),magic[i])
+    assertEquals(0xA4.toByte(),magic[6])
+    assertEquals(0xF5.toByte(),magic[11])
+    assertEquals(0xA4.toByte(),magic[96])
+    assertEquals(0xF5.toByte(),magic[101])
+    assertNull(WakeOnLan.buildMagicPacket("00:00:00:00:00:00"))
+    assertNull(WakeOnLan.buildMagicPacket("ff:ff:ff:ff:ff:ff"))
+    assertEquals(listOf("255.255.255.255","192.168.15.255","192.168.15.42"),WakeOnLan.broadcastTargets("192.168.15.42"))
+  }
 }

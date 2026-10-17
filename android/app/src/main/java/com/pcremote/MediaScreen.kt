@@ -45,16 +45,16 @@ internal class MediaScreen(private val host: ScreenHost, private val volume: Vol
       go
     }
   }
-  private val mic = ui.iconButton(R.drawable.ic_mic, "Falar um comando ou uma pesquisa", 52, tonal = true) { listen() }
-  private val searchButton = ui.iconButton(R.drawable.ic_search, "Pesquisar no YouTube do PC", 52) { search(query.text.toString()) }
-  private val searchHint = ui.text("Fale \"pausar\", \"próxima música\" ou o que quer ver.", TextStyle.CAPTION, p.textSecondary)
-  private val searchCard = ui.card(12).apply {
+  private val mic = ui.iconButton(R.drawable.ic_mic, "Comandos de voz e pesquisa", 52, tonal = true) { listen() }
+  private val searchButton = ui.iconButton(R.drawable.ic_search, "Pesquisar no YouTube", 52) { search(query.text.toString()) }
+  private val searchWarning = ui.text("Atualize o PC Remote no Windows para pesquisar.", TextStyle.CAPTION, p.textSecondary)
+  private val searchCard = ui.card(10).apply {
     addView(ui.row(8).apply {
       addView(query, ui.weighted())
       addView(searchButton)
       addView(mic)
     })
-    addView(searchHint)
+    addView(searchWarning)
   }
 
   private val volumeValue = ui.tabular(ui.text("0", TextStyle.DISPLAY))
@@ -122,7 +122,6 @@ internal class MediaScreen(private val host: ScreenHost, private val volume: Vol
   }
   private val next = ui.iconButton(R.drawable.ic_skip_forward, "Próxima faixa", 52) { media("next") }
   private val forward10 = ui.iconButton(R.drawable.ic_rotate_cw, "Avançar 10 segundos", 52) { media("seek", 10) }
-  private val limited = ui.text("Os controles apagados não funcionam com este player.", TextStyle.CAPTION, p.textTertiary).apply { gravity = Gravity.CENTER }
   private val player = ui.column(20).apply {
     addView(ui.column(4).apply { addView(app); addView(title) })
     addView(LinearLayout(ui.context).apply {
@@ -132,7 +131,6 @@ internal class MediaScreen(private val host: ScreenHost, private val volume: Vol
       addView(play, LinearLayout.LayoutParams(ui.dp(76), ui.dp(76)).apply { marginStart = ui.dp(8); marginEnd = ui.dp(8) })
       listOf<View>(next, forward10).forEach { addView(it, LinearLayout.LayoutParams(0, ui.dp(52), 1f)) }
     })
-    addView(limited, ui.matchWrap())
   }
   private val playerCard = ui.card().apply {
     addView(ui.cardHeader("Tocando agora"))
@@ -211,7 +209,7 @@ internal class MediaScreen(private val host: ScreenHost, private val volume: Vol
       progressBackgroundTintList = ColorStateList.valueOf(p.border)
       importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
-    val panel = PanelSheet(host.panels, ui, "Ouvindo…", "Fale um comando ou o que quer ver no YouTube.")
+    val panel = PanelSheet(host.panels, ui, "Ouvindo…")
     panel.body.addView(heard, ui.matchWrap())
     panel.body.addView(meter, ui.matchWrap())
     heard.accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
@@ -280,8 +278,7 @@ internal class MediaScreen(private val host: ScreenHost, private val volume: Vol
     playerCard.visibility = if (connected) View.VISIBLE else View.GONE
     if (!connected) return
 
-    // An old PC still takes voice commands for the player; only the search needs the update.
-    searchHint.text = if (state.searchSupported) "Fale \"pausar\", \"próxima música\" ou o que quer ver." else "Atualize o PC Remote no Windows para pesquisar. Os comandos de voz do player funcionam."
+    searchWarning.visibility = if (state.searchSupported) View.GONE else View.VISIBLE
     query.isEnabled = state.searchSupported
     searchButton.isEnabled = state.searchSupported
     searchButton.alpha = if (state.searchSupported) 1f else 0.4f
@@ -334,7 +331,6 @@ internal class MediaScreen(private val host: ScreenHost, private val volume: Vol
     setAvailable(forward10, cap.seek)
     setAvailable(previous, cap.previous)
     setAvailable(next, cap.next)
-    limited.visibility = if (cap.seek && cap.previous && cap.next && (cap.play || cap.pause)) View.GONE else View.VISIBLE
   }
 
   private fun setAvailable(view: View, available: Boolean) {

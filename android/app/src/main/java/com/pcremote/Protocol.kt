@@ -8,8 +8,8 @@ import java.util.UUID
 internal data class ClipPush(val revision: Long, val automatic: Boolean)
 
 internal sealed interface Incoming {
-  /** [fileReceive] (file.receive) means the PC took files.v2; [os] comes from info.v1. */
-  data class Welcome(val id: String, val pcId: String, val pcName: String, val input: Boolean, val files: Boolean = false, val fileReceive: Boolean = false, val search: Boolean = false, val os: String = "", val power: Boolean = false, val clipboardImage: Boolean = false) : Incoming
+  /** [fileReceive] (file.receive) means the PC took files.v2; [os] comes from info.v1; [macs] comes from wol.v1. */
+  data class Welcome(val id: String, val pcId: String, val pcName: String, val input: Boolean, val files: Boolean = false, val fileReceive: Boolean = false, val search: Boolean = false, val os: String = "", val power: Boolean = false, val clipboardImage: Boolean = false, val macs: List<String> = emptyList(), val numpad: Boolean = false, val presentation: Boolean = false, val deck: Boolean = false) : Incoming
   /** files.v2: the PC offers a file to this phone; the ticket opens /v1/files with file.fetch. */
   data class FilePush(val transferId: String, val name: String, val size: Long, val mime: String, val ticket: String, val clipboard: ClipPush? = null) : Incoming
   /** Sent before the ack of a file.offer; [id] is the offer request id. */
@@ -52,8 +52,9 @@ internal object Protocol {
   private const val MAX_WINDOW = 16777216
   private val tokenPattern = Regex("[a-fA-F0-9]{64}")
   private val lowerHex = Regex("[a-f0-9]{64}")
+  val macPattern = Regex("([0-9a-f]{2}:){5}[0-9a-f]{2}")
   private val errorCodes = setOf("invalid_message", "version_mismatch", "unauthorized", "pairing_expired", "pairing_denied", "rate_limited", "unavailable", "conflict", "sensitive", "too_large", "clipboard_busy", "internal", "file_type", "file_busy", "file_integrity", "storage")
-  private val capabilities = setOf("audio", "media", "clipboard.text", "input.control", "file.transfer", "file.receive", "search.youtube", "power.control", "clipboard.image")
+  private val capabilities = setOf("audio", "media", "clipboard.text", "input.control", "input.numpad", "presentation.control", "deck.control", "wol.target", "file.transfer", "file.receive", "search.youtube", "power.control", "clipboard.image")
   val powerActions = setOf("lock", "sleep", "shutdown", "restart")
   /** power.v1: up to 24 h; lock only now. */
   fun powerValid(action: String, delaySeconds: Int): Boolean = action in powerActions && delaySeconds in 0..86400 && (action != "lock" || delaySeconds == 0)
@@ -63,7 +64,10 @@ internal object Protocol {
   fun mimeValid(value: String): Boolean = value.length <= 127 && mimePattern.matches(value)
   /** search.v1 query: 1..200 code points, no control characters, not only spaces. */
   fun queryValid(value: String): Boolean = value.isNotBlank() && validText(value, 4096, true) && value.codePointCount(0, value.length) <= 200
-  private val keys = setOf("enter", "backspace", "tab", "escape", "left", "right", "up", "down", "delete", "home", "end")
+  val numpadKeys = setOf("numpad_0", "numpad_1", "numpad_2", "numpad_3", "numpad_4", "numpad_5", "numpad_6", "numpad_7", "numpad_8", "numpad_9", "numpad_decimal", "numpad_comma", "numpad_add", "numpad_subtract", "numpad_multiply", "numpad_divide", "numpad_enter")
+  val presentationCommands = setOf("start", "start_current", "stop", "next", "previous", "blackout", "whiteout")
+  val deckActions = setOf("show_desktop", "task_view", "switch_window", "close_window", "screenshot", "fullscreen", "lock_pc", "calculator", "downloads", "browser", "task_manager", "emoji_picker")
+  private val keys = setOf("enter", "backspace", "tab", "escape", "left", "right", "up", "down", "delete", "home", "end") + numpadKeys
   fun uuid(value: String): Boolean = try { UUID.fromString(value).toString().equals(value, true) } catch (_: Exception) { false }
   fun validText(value: String, limit: Int = 65536, input: Boolean = false): Boolean {
     if (input && value.isEmpty()) return false
@@ -129,9 +133,10 @@ internal object Protocol {
     val o = JSONObject(raw)
     if (number(o, "v") != 1L) return null
     when (str(o, "type")) {
-      "welcome" -> { exactOptional(o, setOf("v", "type", "id", "pcId", "pcName", "capabilities"), setOf("os")); val arr = array(o,"capabilities"); if (arr.length() > 16) return null; val caps = (0 until arr.length()).map { arr.opt(it) as? String ?: return null }; if (!caps.all { it in capabilities }) return null
+      "welcome" -> { exactOptional(o, setOf("v", "type", "id", "pcId", "pcName", "capabilities"), setOf("os", "macs")); val arr = array(o,"capabilities"); if (arr.length() > 16) return null; val caps = (0 until arr.length()).map { arr.opt(it) as? String ?: return null }; if (!caps.all { it in capabilities }) return null
         val os = if (o.has("os")) str(o,"os").also { if (!validText(it, 64, true)) return null } else ""
-        Incoming.Welcome(uid(o,"id"),uid(o,"pcId"),str(o,"pcName").also { if (!validText(it, 256)) return null },"input.control" in caps,"file.transfer" in caps,"file.receive" in caps,"search.youtube" in caps,os,"power.control" in caps,"clipboard.image" in caps) }
+        val macs = if (o.has("macs")) { val ma = array(o,"macs"); if (ma.length() > 8) return null; (0 until ma.length()).map { (ma.opt(it) as? String)?.lowercase()?.also { m -> if (!macPattern.matches(m)) return null } ?: return null }.distinct() } else emptyList()
+        Incoming.Welcome(uid(o,"id"),uid(o,"pcId"),str(o,"pcName").also { if (!validText(it, 256)) return null },"input.control" in caps,"file.transfer" in caps,"file.receive" in caps,"search.youtube" in caps,os,"power.control" in caps,"clipboard.image" in caps,macs,"input.numpad" in caps,"presentation.control" in caps,"deck.control" in caps) }
       "file.push" -> { exactOptional(o,setOf("v","type","transferId","name","size","mime","ticket"),setOf("clipboard"))
         val clip = if (o.has("clipboard")) { val c=obj(o,"clipboard"); exact(c,"revision","automatic"); ClipPush(number(c,"revision"),bool(c,"automatic")) } else null
         Incoming.FilePush(uid(o,"transferId"),str(o,"name").also { if (!validText(it,255,true)) return null },number(o,"size").also { if (it<1 || it>FileRules.MAX_BYTES) return null },str(o,"mime").also { if (!mimeValid(it)) return null },str(o,"ticket").also { if (!lowerHex.matches(it)) return null },clip) }
@@ -213,6 +218,8 @@ internal object Protocol {
       is RemoteAction.PointerScroll -> if(a.steps in -10..10 && a.steps != 0) JSONObject().put("kind","pointer.scroll").put("steps",a.steps) else null
       is RemoteAction.KeyboardText -> if(validText(a.text,1024,true)) JSONObject().put("kind","keyboard.text").put("text",a.text) else null
       is RemoteAction.KeyboardKey -> if(a.key in keys) JSONObject().put("kind","keyboard.key").put("key",a.key) else null
+      is RemoteAction.PresentationControl -> if(a.command in presentationCommands) JSONObject().put("kind","presentation.control").put("command",a.command) else null
+      is RemoteAction.DeckTrigger -> if(a.id in deckActions) JSONObject().put("kind","deck.trigger").put("id",a.id) else null
       is RemoteAction.FileOffer -> { val c = a.clipboard
         if (c == null) { if(uuid(a.transferId) && FileRules.offerValid(a.name,a.size,a.mime,a.twoWay)) JSONObject().put("kind","file.offer").put("transferId",a.transferId).put("name",a.name).put("size",a.size).put("mime",a.mime) else null }
         else if(uuid(a.transferId) && uuid(c.eventId) && c.baseRevision >= 0 && ClipImages.offerValid(a.name,a.size,a.mime)) JSONObject().put("kind","file.offer").put("transferId",a.transferId).put("name",a.name).put("size",a.size).put("mime",a.mime)

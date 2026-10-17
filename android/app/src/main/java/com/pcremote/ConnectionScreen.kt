@@ -145,6 +145,7 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
   private val disconnect = ui.button("Desconectar", ButtonStyle.OUTLINED, R.drawable.ic_unplug) { client.disconnect() }
   private val reconnect = ui.button("Reconectar", ButtonStyle.FILLED, R.drawable.ic_refresh_cw) { client.reconnect() }
   private val other = ui.button("Adicionar PC", ButtonStyle.TONAL, R.drawable.ic_scan_qr_code) { addComputer() }
+  private val wake = ui.button("Ligar PC (WoL)", ButtonStyle.TONAL, R.drawable.ic_zap) { wakeComputer(null) }
   private val currentCard = ui.card().apply {
     addView(ui.row(16).apply {
       addView(FrameLayout(context).apply {
@@ -157,6 +158,7 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
       }, ui.weighted())
     })
     addView(ui.row(8).apply { addView(disconnect, ui.weighted()); addView(reconnect, ui.weighted()); addView(other, ui.weighted()) })
+    addView(wake, ui.matchWrap())
     addView(ui.button("Remover este PC", ButtonStyle.DANGER, R.drawable.ic_trash_2) { confirmForget() }, ui.matchWrap())
   }
 
@@ -246,6 +248,12 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
     if (state.computers.size >= PcList.MAX) host.notify("Remova um PC para adicionar outro.", Tone.DANGER) else host.openPairingSheet()
   }
 
+  private fun wakeComputer(id: String?) {
+    client.wakeComputer(id) { error ->
+      host.result(error, "Pacote Wake-on-LAN enviado na rede.")
+    }
+  }
+
   private fun otherRow(pc: SavedComputer): View = ui.row(12).apply {
     addView(FrameLayout(context).apply {
       background = ui.rounded(p.surfaceSunken, 12f)
@@ -255,6 +263,9 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
       addView(ui.text(pc.name.ifBlank { "PC pareado" }, TextStyle.BODY_STRONG).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
       if (pc.os.isNotEmpty()) addView(ui.text(pc.os, TextStyle.CAPTION, p.textSecondary).apply { maxLines = 1 })
     }, ui.weighted())
+    if (pc.macs.isNotEmpty()) {
+      addView(ui.iconButton(R.drawable.ic_zap, "Ligar ${pc.name.ifBlank { "PC" }}", 44) { wakeComputer(pc.id) })
+    }
     addView(ui.button("Conectar", ButtonStyle.TONAL) { client.switchComputer(pc.id) })
     addView(ui.iconButton(R.drawable.ic_trash_2, "Remover ${pc.name.ifBlank { "PC" }}", 44) { confirmForget(pc) })
   }
@@ -294,6 +305,9 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
       disconnect.visibility = if (connected) View.VISIBLE else View.GONE
       reconnect.visibility = if (connected) View.GONE else View.VISIBLE
       reconnect.isEnabled = !waiting
+      val currentMacs = state.computers.firstOrNull { it.current }?.macs.orEmpty()
+      wake.visibility = if (!connected && currentMacs.isNotEmpty()) View.VISIBLE else View.GONE
+      wake.isEnabled = !waiting
       renderOthers(state.computers)
     }
 

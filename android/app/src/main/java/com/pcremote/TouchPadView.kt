@@ -2,6 +2,7 @@ package com.pcremote
 
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.view.MotionEvent
@@ -32,6 +33,7 @@ internal class TouchPadView(
   private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = ui.dp(1.5f); color = ui.palette.accent }
   private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ui.palette.ripple }
   private val fillAlpha = ui.palette.ripple ushr 24
+  private var gridBitmap: Bitmap? = null
   private var tracking = false
   private var lastX = 0f
   private var lastY = 0f
@@ -52,16 +54,30 @@ internal class TouchPadView(
     contentDescription = "Touchpad. Um dedo move o cursor e toque clica. Dois dedos rolam; toque com dois dedos abre o menu."
   }
 
-  override fun onDraw(canvas: Canvas) {
-    super.onDraw(canvas)
+  override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+    super.onSizeChanged(w, h, oldw, oldh)
+    gridBitmap?.recycle()
+    gridBitmap = null
+    if (w <= 0 || h <= 0) return
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
     val step = ui.dp(22f)
     val radius = ui.dp(1.3f)
     var y = step / 2
-    while (y < height) {
+    while (y < h) {
       var x = step / 2
-      while (x < width) { canvas.drawCircle(x, y, radius, dotPaint); x += step }
+      while (x < w) {
+        c.drawCircle(x, y, radius, dotPaint)
+        x += step
+      }
       y += step
     }
+    gridBitmap = bmp
+  }
+
+  override fun onDraw(canvas: Canvas) {
+    super.onDraw(canvas)
+    gridBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
     if (indicator > 0f) {
       val r = ui.dp(32f) * (0.6f + 0.4f * indicator)
       fillPaint.alpha = (fillAlpha * indicator).toInt()
@@ -102,10 +118,11 @@ internal class TouchPadView(
         val (x, y) = centroid(event, -1)
         val dx = x - lastX
         val dy = y - lastY
-        val dt = max(1L, event.eventTime - lastTime)
+        val dt = max(MIN_DT_MS, event.eventTime - lastTime)
         lastX = x; lastY = y; lastTime = event.eventTime
         travel += abs(dx) + abs(dy)
-        indicatorX = event.getX(0); indicatorY = event.getY(0); invalidate()
+        indicatorX = event.getX(0); indicatorY = event.getY(0)
+        if (indicator > 0f) invalidate()
         if (event.pointerCount >= 2) {
           // Natural direction, like the phone itself: fingers down reveal content above.
           scrollRemainder += dy / density
@@ -132,7 +149,7 @@ internal class TouchPadView(
 
   private fun anchor(event: MotionEvent, excluded: Int) {
     val (x, y) = centroid(event, excluded)
-    lastX = x; lastY = y
+    lastX = x; lastY = y; lastTime = event.eventTime
   }
 
   private fun centroid(event: MotionEvent, excluded: Int): Pair<Float, Float> {
@@ -180,6 +197,8 @@ internal class TouchPadView(
 
   override fun onDetachedFromWindow() {
     fade?.cancel()
+    gridBitmap?.recycle()
+    gridBitmap = null
     if (tracking) finish(tap = false)
     super.onDetachedFromWindow()
   }
@@ -189,6 +208,7 @@ internal class TouchPadView(
     const val BASE_GAIN = 1.4f
     const val ACCELERATION = 2.2f
     const val MAX_EXTRA_GAIN = 2.6f
+    const val MIN_DT_MS = 8L
     const val SCROLL_STEP_DP = 22f
     const val TAP_MS = 260L
   }
