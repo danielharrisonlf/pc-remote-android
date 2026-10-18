@@ -1,0 +1,37 @@
+appId: com.pcremote.nativeandroid
+name: Android 12 startup and Controls navigation
+tags:
+  - android12
+  - startup
+  - smoke
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- assertVisible: "PC Remote"
+- takeScreenshot: "01-startup-connection.png"
+- tapOn: "Touchpad"
+- assertVisible: "Sem conexão com o PC"
+- takeScreenshot: "02-touchpad.png"
+- tapOn: "Controles"
+- assertVisible: "Deck"
+- assertVisible: "123"
+- assertVisible: "Slides"
+- assertVisible: "Sem conexão com o PC"
+- takeScreenshot: "03-controls-deck.png"
+- tapOn: "123"
+- assertVisible: "123"
+- takeScreenshot: "04-controls-123.png"
+- tapOn: "Slides"
+- assertVisible: "Slides"
+- takeScreenshot: "05-controls-slides.png"
+- tapOn: "Mídia"
+- assertVisible: "Mídia e volume do PC"
+- takeScreenshot: "06-media.png"
+- tapOn: "Transferir"
+- assertVisible: "Arquivos"
+- takeScreenshot: "07-transfer.png"
+- tapOn: "Conexão"
+- assertVisible: "Conectar a um computador"
+- assertVisible: "Sincronização em tempo real"
+- takeScreenshot: "08-connection.png"

@@ -1,9 +1,10 @@
-# Tamanho real do APK — Kotlin 0.6.3
+# Tamanho real do APK — Kotlin 0.6.4
 
-Medido nos arquivos gerados para publicação em 17/10/2026. MB = 1.000.000 bytes; MiB = 1.048.576 bytes.
+APK 0.6.4 medido em 18/10/2026; comparação com as builds anteriores de 17/10/2026. MB = 1.000.000 bytes; MiB = 1.048.576 bytes.
 
 | Build | Bytes | MB | MiB |
 |---|---:|---:|---:|
+| Kotlin 0.6.4 release, R8 e recursos reduzidos | 724989 | 0.725 | 0.691 |
 | Kotlin 0.6.3 release, R8 e recursos reduzidos | 723457 | 0.723 | 0.690 |
 | Kotlin 0.6.3 sizeBaseline, sem R8 | 2604523 | 2.605 | 2.484 |
 | Kotlin 0.6.2 release, antes desta versão | 771929 | 0.772 | 0.736 |
@@ -31,6 +32,7 @@ A assinatura, o ambiente e a versão das ferramentas podem alterar alguns bytes;
 ## SHA-256
 
 ```text
+baabf15d25d84cd821bcf4ecccdb7ac99011e598f22674dfc2e945e2c0360126  pc-remote-android-kotlin-0.6.4-evaluation.apk
 673890551e02d89f5b8448ab0cf25b0500a9416782d4c102299b6c0347fea3f9  pc-remote-android-kotlin-0.6.3-evaluation.apk
 ed832b24508ce93dad93d5ab6bdc8adb9bb895c2959dcccc0ea66a7dc4b98be6  pc-remote-android-kotlin-0.6.3-unminified-evaluation.apk
 ```

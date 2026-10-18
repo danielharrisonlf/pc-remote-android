@@ -48,6 +48,7 @@ internal class MainActivity : Activity(), ScreenHost {
   private var updateSheet: UpdateSheet? = null
   /** Sent to "Instalar apps desconhecidos"; the update continues on return. */
   private var awaitingInstallPermission = false
+  private var awaitingUpdateReturnPermission = false
   /** Permission granted in a new process: install once the check finds the release again. */
   private var installAfterCheck = false
   private var unregisterBack: (() -> Unit)? = null
@@ -93,6 +94,7 @@ internal class MainActivity : Activity(), ScreenHost {
     UpdateNotice.seen(this)
     updateState = UpdateState(lookup = lastLookup, installed = Releases.installed(installedVersionName()), skipped = prefs.skippedUpdate, flow = updates.flow)
     awaitingInstallPermission = savedInstanceState?.getBoolean(KEY_INSTALL_PERMISSION) == true
+    awaitingUpdateReturnPermission = savedInstanceState?.getBoolean(KEY_UPDATE_RETURN_PERMISSION) == true
     val restored = savedInstanceState?.getString(KEY_TAB)?.let { runCatching { Tab.valueOf(it) }.getOrNull() }
     navigation = TabNavigation(restored ?: homeTab())
     // A recreated Activity or a launch from Recents carries an old share: it was already handled.
@@ -119,6 +121,7 @@ internal class MainActivity : Activity(), ScreenHost {
     }
     render()
     unregisterBack = BackNavigation.register(this) { navigateBack() }
+    updates.handleInstallResult(intent)
     if (savedInstanceState?.getBoolean(KEY_FADE_IN) == true) {
       root.alpha = 0f
       root.animate().alpha(1f).setDuration(200).start()
@@ -130,6 +133,7 @@ internal class MainActivity : Activity(), ScreenHost {
     outState.putString(KEY_TAB, navigation.tab.name)
     outState.putBoolean(KEY_FADE_IN, fadingOut)
     outState.putBoolean(KEY_INSTALL_PERMISSION, awaitingInstallPermission)
+    outState.putBoolean(KEY_UPDATE_RETURN_PERMISSION, awaitingUpdateReturnPermission)
   }
 
   override fun onResume() {
@@ -144,6 +148,10 @@ internal class MainActivity : Activity(), ScreenHost {
         updateState.release != null -> startUpdate()
         else -> installAfterCheck = true
       }
+    }
+    if (awaitingUpdateReturnPermission) {
+      awaitingUpdateReturnPermission = false
+      if (updateState.release != null) startUpdate() else installAfterCheck = true
     }
     val stale = System.currentTimeMillis() - prefs.lastUpdateCheck > UPDATE_INTERVAL_MS
     if (lastLookup == null || stale) checkUpdates(manual = false)
@@ -185,6 +193,7 @@ internal class MainActivity : Activity(), ScreenHost {
     requestedTab(intent)?.let(navigation::goTo)
     volumeInteraction.finish()
     render()
+    updates.handleInstallResult(intent)
   }
 
   private fun isShare(intent: Intent) = intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE
@@ -632,6 +641,38 @@ internal class MainActivity : Activity(), ScreenHost {
       return
     }
     if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) { explainInstallPermission(); return }
+    if (Build.VERSION.SDK_INT >= 29 && !Settings.canDrawOverlays(this) && !prefs.askedUpdateReturn) {
+      explainUpdateReturnPermission(release)
+      return
+    }
+    updates.start(release, install = true)
+  }
+
+  private fun explainUpdateReturnPermission(release: Release) {
+    AlertDialog.Builder(this, dialogTheme(kit.palette))
+      .setTitle("Reabrir após atualizar")
+      .setMessage("Para voltar ao PC Remote automaticamente após a instalação, o Android exige a autorização opcional \"Exibir sobre outros apps\". Nos ajustes, selecione PC Remote e permita. Essa autorização continua válida depois da atualização e permite reabrir o app sobre outra tela. Se preferir só atualizar, abra depois pelo ícone ou pela notificação, se habilitada.")
+      .setNegativeButton("Só atualizar") { _, _ ->
+        prefs.askedUpdateReturn = true
+        updates.start(release, install = true)
+      }
+      .setPositiveButton("Abrir ajustes") { _, _ ->
+        prefs.askedUpdateReturn = true
+        awaitingUpdateReturnPermission = true
+        try {
+          startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+        } catch (_: ActivityNotFoundException) {
+          updateReturnUnavailable(release)
+        } catch (_: SecurityException) {
+          updateReturnUnavailable(release)
+        }
+      }
+      .show()
+  }
+
+  private fun updateReturnUnavailable(release: Release) {
+    awaitingUpdateReturnPermission = false
+    updateNotice("Este Android não abriu a autorização. A atualização continuará; abra depois pelo ícone ou pela notificação, se habilitada.", Tone.ACCENT)
     updates.start(release, install = true)
   }
 
@@ -673,6 +714,7 @@ internal class MainActivity : Activity(), ScreenHost {
     const val KEY_TAB = "tab"
     const val KEY_FADE_IN = "fadeIn"
     const val KEY_INSTALL_PERMISSION = "installPermission"
+    const val KEY_UPDATE_RETURN_PERMISSION = "updateReturnPermission"
     const val NOTIFY_UPDATE = 42
     const val PICK_FILES = 41
     const val MICROPHONE = 43

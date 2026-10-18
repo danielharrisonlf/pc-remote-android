@@ -2,6 +2,7 @@ package com.pcremote
 
 import android.Manifest
 import android.app.Activity
+import android.app.ActivityOptions
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -18,6 +19,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import okhttp3.Call
 import okhttp3.ConnectionPool
@@ -32,6 +34,7 @@ import java.io.IOException
 import java.io.OutputStream
 import java.lang.ref.WeakReference
 import java.security.MessageDigest
+import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -48,6 +51,7 @@ internal class UpdateManager(context: Context) {
   private val main = Handler(Looper.getMainLooper())
   private val worker = Executors.newSingleThreadExecutor()
   private val dir = File(app.cacheDir, "updates")
+  private val installPrefs = app.getSharedPreferences("update_install", Context.MODE_PRIVATE)
   private val http = OkHttpClient.Builder()
     .connectTimeout(15, TimeUnit.SECONDS)
     .readTimeout(30, TimeUnit.SECONDS)
@@ -286,7 +290,7 @@ internal class UpdateManager(context: Context) {
     worker.execute {
       val problem = try {
         verify(ready.file, ready.sha) // Again: the file sat in the cache since the download.
-        commit(ready.file)
+        commit(ready.file, ready.release.version)
         null
       } catch (e: UpdateError) {
         e.message
@@ -300,8 +304,8 @@ internal class UpdateManager(context: Context) {
     }
   }
 
-  /** PackageInstaller session; the result arrives in [UpdateInstallReceiver]. */
-  private fun commit(file: File) {
+  /** Return through the Activity when authorized; otherwise deliver status by broadcast. */
+  private fun commit(file: File, version: AppVersion) {
     val installer = app.packageManager.packageInstaller
     val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
       setAppPackageName(app.packageName)
@@ -317,18 +321,53 @@ internal class UpdateManager(context: Context) {
           file.inputStream().use { it.copyTo(out, 64 * 1024) }
           session.fsync(out)
         }
-        val status = Intent(app, UpdateInstallReceiver::class.java).setPackage(app.packageName)
+        val token = UUID.randomUUID().toString()
+        // Persist before commit: replacing our own APK terminates this process.
+        check(installPrefs.edit().putInt("session", id).putString("token", token)
+          .putString("version", version.toString()).commit())
+        val reopen = Build.VERSION.SDK_INT < 29 || Settings.canDrawOverlays(app)
+        val target = if (reopen) MainActivity::class.java else UpdateInstallReceiver::class.java
+        val status = Intent(app, target).setAction(INSTALL_RESULT)
+          .putExtra(INSTALL_TOKEN, token)
+          .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         // The system adds the status extras, so Android 12+ needs a mutable PendingIntent.
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
-        session.commit(PendingIntent.getBroadcast(app, id, status, flags).intentSender)
+        val options = if (Build.VERSION.SDK_INT >= 34) ActivityOptions.makeBasic().apply {
+          setPendingIntentCreatorBackgroundActivityStartMode(
+            if (Build.VERSION.SDK_INT >= 36) ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS
+            else ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
+          )
+        }.toBundle() else null
+        val result = if (reopen) PendingIntent.getActivity(app, id, status, flags, options)
+          else PendingIntent.getBroadcast(app, id, status, flags)
+        session.commit(result.intentSender)
       }
     } catch (e: Exception) {
+      clearInstallAttempt(id)
       try { installer.abandonSession(id) } catch (_: Exception) {}
       throw e
     }
   }
 
-  /** From [UpdateInstallReceiver], on the main thread. */
+  /** MainActivity is exported; accept results only for the private committed attempt. */
+  fun handleInstallResult(intent: Intent?): Boolean {
+    if (intent?.action != INSTALL_RESULT) return false
+    val id = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
+    val attempt = UpdateInstallAttempt(installPrefs.getInt("session", -1), installPrefs.getString("token", null))
+    if (!attempt.matches(id, intent.getStringExtra(INSTALL_TOKEN))) return true
+    val version = Releases.installed(installPrefs.getString("version", null)) ?: return true
+    if (flow !is UpdateFlow.Installing) flow = UpdateFlow.Installing(version)
+    val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+    if (status != PackageInstaller.STATUS_PENDING_USER_ACTION) clearInstallAttempt(id)
+    onSessionStatus(intent)
+    return true
+  }
+
+  private fun clearInstallAttempt(id: Int) {
+    if (installPrefs.getInt("session", -1) == id) installPrefs.edit().clear().commit()
+  }
+
+  /** Activity callback, or legacy [UpdateInstallReceiver], on the main thread. */
   fun onSessionStatus(intent: Intent) {
     val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
     if (flow !is UpdateFlow.Installing) {
@@ -407,6 +446,8 @@ internal class UpdateManager(context: Context) {
   }
 
   companion object {
+    private const val INSTALL_RESULT = "com.pcremote.INSTALL_RESULT"
+    private const val INSTALL_TOKEN = "com.pcremote.INSTALL_TOKEN"
     /** Debug builds only: one line with the releases URL of a test server. */
     const val DEBUG_RELEASES_FILE = "debug-releases-url.txt"
     private const val MAX_REDIRECTS = 5
@@ -435,7 +476,8 @@ internal class UpdateManager(context: Context) {
 /** Status of the install session. Not exported: only the PendingIntent this app created reaches it. */
 internal class UpdateInstallReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
-    (context.applicationContext as RemoteApplication).updates.onSessionStatus(intent)
+    val updates = (context.applicationContext as RemoteApplication).updates
+    if (!updates.handleInstallResult(intent)) updates.onSessionStatus(intent)
   }
 }
 

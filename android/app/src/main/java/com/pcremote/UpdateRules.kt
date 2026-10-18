@@ -143,6 +143,12 @@ internal sealed interface UpdateFlow {
   data class Failed(override val version: AppVersion, val message: String) : UpdateFlow
 }
 
+/** A result delivered to the public launcher must belong to our committed session. */
+internal data class UpdateInstallAttempt(val sessionId: Int, val token: String?) {
+  fun matches(resultSessionId: Int, resultToken: String?): Boolean =
+    sessionId >= 0 && sessionId == resultSessionId && !token.isNullOrEmpty() && token == resultToken
+}
+
 internal enum class UpdateCommand { NONE, DOWNLOAD, INSTALL }
 
 internal object UpdateFlows {
@@ -203,7 +209,7 @@ internal object UpdateLabels {
       is UpdateFlow.Downloading -> "Baixando a versão $version…${percent(flow)}" to "Toque para ver as novidades."
       is UpdateFlow.Verifying -> "Conferindo a versão $version…" to "SHA-256 e assinatura."
       is UpdateFlow.Ready -> "Atualização pronta — toque para instalar" to "Versão $version baixada e conferida."
-      is UpdateFlow.Installing -> "Instalando a versão $version…" to "O app fecha e volta atualizado."
+      is UpdateFlow.Installing -> "Instalando a versão $version…" to "O Android está substituindo o app."
       else -> "Versão $version disponível" to "Toque para ver as novidades."
     }
   }

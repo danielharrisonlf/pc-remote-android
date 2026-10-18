@@ -1,8 +1,8 @@
-# Versões da build Kotlin — 17/10/2026
+# Versões da build Kotlin — 18/10/2026
 
 | Componente | Versão usada |
 |---|---|
-| Android / desktop | 0.6.3-kotlin (versionCode 603) / 0.6.4 |
+| Android / desktop | 0.6.4-kotlin (versionCode 604) / 0.6.4 |
 | Protocolo | 1 + extensões opcionais input.v1, files.v1, files.v2, search.v1, info.v1, power.v1, clipboard.v2, wol.v1, numpad.v1, presentation.v1 e deck.v1 |
 | Android Gradle Plugin | 9.2.1 |
 | Kotlin integrado ao AGP | 2.2.10, confirmado por buildEnvironment |
@@ -20,7 +20,7 @@ Versões diretas são exatas no Gradle. O projeto não utiliza package-lock, Her
 
 | Android | Desktop | Compatibilidade |
 |---|---|---|
-| 0.6.2–0.6.3-kotlin | 0.6.3–0.6.4 | Protocolo 1 + input.v1, files.v1, files.v2, search.v1, info.v1, power.v1, clipboard.v2, wol.v1, numpad.v1, presentation.v1 e deck.v1: tudo da 0.6.1, mais Wake-on-LAN (descoberta de MAC e envio de magic packet UDP), aba dedicada Controles (Deck de 12 atalhos, teclado numérico 123 e apresentador de slides com temporizador e botões de volume físico), Touchpad restaurado em tela cheia e pipeline de mouse otimizado a 60 FPS |
+| 0.6.2–0.6.4-kotlin | 0.6.3–0.6.4 | Protocolo 1 + input.v1, files.v1, files.v2, search.v1, info.v1, power.v1, clipboard.v2, wol.v1, numpad.v1, presentation.v1 e deck.v1: tudo da 0.6.1, mais Wake-on-LAN (descoberta de MAC e envio de magic packet UDP), aba dedicada Controles (Deck de 12 atalhos, teclado numérico 123 e apresentador de slides com temporizador e botões de volume físico), Touchpad restaurado em tela cheia e pipeline de mouse otimizado a 60 FPS |
 | 0.6.1-kotlin | 0.6.1 | Protocolo 1 + input.v1, files.v1, files.v2, search.v1, info.v1, power.v1 e clipboard.v2: tudo da 0.6.0, mais bloquear, suspender, desligar e reiniciar o PC (agora ou agendado) e imagens na área de transferência nos dois sentidos |
 | 0.6.1-kotlin | 0.6.0 | O PC ignora power.v1 e clipboard.v2: sem energia do PC e clipboard só com texto; vários PCs e controles de mídia fora do app funcionam |
 | 0.6.0-kotlin | 0.6.1 | Formato 0.6.0, sem campos novos |

@@ -14,6 +14,8 @@
   <!-- In-app updates of this app only, through PackageInstaller after the user taps. -->
   <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
   <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+  <!-- Optional special access: permits returning to the app after its update kills the process. -->
+  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
   <!-- The system speech recognizer must be visible to SpeechRecognizer on Android 11+. -->
   <queries>
     <intent><action android:name="android.speech.RecognitionService" /></intent>

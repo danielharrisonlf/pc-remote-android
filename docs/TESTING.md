@@ -2,6 +2,18 @@
 
 Registro da alternativa 0.2.0-kotlin em 14/10/2026. Os resultados React Native da branch main não são apresentados como testes desta implementação. Integrações reais: Android SDK/Keystore/OkHttp e Windows Rust/Core Audio/GSMTC/clipboard/SendInput. Não há simulações no produto.
 
+## Correção 0.6.4-kotlin — abertura e retorno da atualização, 18/10/2026
+
+- `testDebugUnitTest lintRelease assembleRelease assembleDebug`: sucesso; **145 testes passaram**, zero falhas. Lint release: zero erros e 28 avisos.
+- Android 12/API31, AVD dedicado `PCRemote_API31`, sessão somente leitura em `emulator-5556`. O emulador pessoal `emulator-5554` não foi modificado.
+- O APK release publicado da 0.6.3 foi reproduzido fechando na abertura: NullPointerException no construtor da tela Controles, chamado por MainActivity. O APK release otimizado 0.6.4 foi instalado por cima e abriu normalmente; navegação nas cinco abas e seleção de Deck/123/Slides sem crash.
+- O APK final tem 724.989 bytes, mesmo pacote e mesmo certificado da 0.6.3; SHA-256 `baabf15d25d84cd821bcf4ecccdb7ac99011e598f22674dfc2e945e2c0360126`.
+- Esse arquivo final exato foi instalado com `adb install -r -d` sobre a fixture 609, sem limpar dados. Cold start da 0.6.4 aprovado: MainActivity em foco, versão 604, buffer de crash vazio, roteiro Maestro completo aprovado e preferência de sincronização ainda desativada.
+- Atualização real pelo PackageInstaller, fixture debug 606 → release otimizada 607 com o mesmo código da correção: autorização **Exibir sobre outros apps** concedida pela UI do Android, APK substituído e MainActivity retornando sozinha em novo processo, sem comando de abertura após instalar. O log do sistema confirma que a autorização permitiu iniciar a Activity. A preferência `realtime=false` permaneceu salva.
+- Alternativa sem autorização, fixture 608 → release 609: autorização revogada nos ajustes, escolha **Só atualizar**, versão nova instalada sem tomar o foco e notificação **PC Remote atualizado para 0.6.9 — Toque para abrir.** presente. Tocar na notificação abriu a versão nova, sem estado Installing preso; `realtime=false` e a autorização negada foram preservados.
+- O roteiro `.maestro/flows/android12-startup-controls.yaml` passou no Maestro CLI no API31: abertura, cinco abas e seleção de Deck/123/Slides, sem crash. Os números 606 a 609 são apenas fixtures locais; não são releases publicadas.
+- Evidências locais em `artifacts/qa/android12-update/`, na raiz do workspace, fora do repositório. Celular físico e retorno automático no Android 15/16 não foram validados.
+
 ## Atualização 0.6.1-kotlin — vários PCs, mídia fora do app, energia do PC e imagens na área de transferência, 16/10/2026
 
 ### Testes automatizados

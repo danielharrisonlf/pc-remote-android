@@ -14,6 +14,16 @@ class UpdateRulesTest {
   private val v050 = AppVersion(0, 5, 0)
   private val v051 = AppVersion(0, 5, 1)
 
+  @Test fun installResultsRequireTheCommittedSessionAndPrivateToken() {
+    val attempt = UpdateInstallAttempt(42, "private-token")
+    assertTrue(attempt.matches(42, "private-token"))
+    assertFalse(attempt.matches(43, "private-token"))
+    assertFalse(attempt.matches(42, "forged-token"))
+    assertFalse(attempt.matches(42, null))
+    assertFalse(UpdateInstallAttempt(-1, null).matches(-1, null))
+    assertFalse(UpdateInstallAttempt(42, "").matches(42, ""))
+  }
+
   @Test fun assetsMustBeReleaseFilesOfThisRepository() {
     assertTrue(github.allowsAsset("${download}pc-remote-android-kotlin-0.5.0-evaluation.apk"))
     assertTrue(github.allowsAsset("${download}KOTLIN-SHA256SUMS-0.5.0.txt"))

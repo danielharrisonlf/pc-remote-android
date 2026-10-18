@@ -1,21 +1,21 @@
 # PC Remote Android
 
-Versão **0.6.3-kotlin**. Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao desktop Rust/Tauri pela LAN, com protocolo 1 e as extensões `input.v1`, `files.v1`, `files.v2`, `search.v1`, `info.v1`, `power.v1`, `clipboard.v2`, `wol.v1`, `numpad.v1`, `presentation.v1` e `deck.v1`.
+Versão **0.6.4-kotlin**. Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao desktop Rust/Tauri pela LAN, com protocolo 1 e as extensões `input.v1`, `files.v1`, `files.v2`, `search.v1`, `info.v1`, `power.v1`, `clipboard.v2`, `wol.v1`, `numpad.v1`, `presentation.v1` e `deck.v1`.
 
 ## Baixar e instalar
 
 | Aplicativo | Download |
 |---|---|
-| Android — APK universal, Android 7/API24+ | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.3-kotlin/pc-remote-android-kotlin-0.6.3-evaluation.apk) |
+| Android — APK universal, Android 7/API24+ | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.4-kotlin/pc-remote-android-kotlin-0.6.4-evaluation.apk) |
 | Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.4/pc-remote-desktop-0.6.4-x64-setup.exe) |
 
-As releases dos dois repositórios são públicas. Veja a [release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.3-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.4). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
+As releases dos dois repositórios são públicas. Veja a [release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.4-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.4). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
 
 Instale o `.exe` no PC e abra o APK pelo gerenciador de arquivos do celular, autorizando a fonte quando solicitado. O app aparece como **PC Remote**, pacote `com.pcremote.nativeandroid`. Somente um controlador pode ficar conectado por PC. O uso não requer root, ADB, acessibilidade ou teclado especial.
 
 ## Tamanho
 
-**APK 0.6.3: 723457 bytes (0.723 MB), cerca de 96.4% menor que os 20.20 MB do antigo app React Native.** Sem R8: 2.605 MB.
+**APK 0.6.4: 724989 bytes (0.725 MB), cerca de 96.4% menor que os 20.20 MB do antigo app React Native.** A medição sem R8 da 0.6.3 foi de 2.605 MB.
 
 Veja [SIZE.md](docs/SIZE.md) para bytes exatos, hashes e comparação das builds com e sem R8. O tamanho do download difere do espaço instalado e do consumo de RAM. O scanner QR opcional pode baixar módulos externos do Google Play Services, que não fazem parte do APK.
 
@@ -47,7 +47,13 @@ Cinco abas: **Touchpad**, **Controles**, **Mídia**, **Transferir** e **Conexão
 
 ## Atualizações
 
+Correção **0.6.4-kotlin**: elimina o fechamento na abertura introduzido na 0.6.3 e usa o resultado do instalador do Android para reabrir o app após atualizações iniciadas dentro dele, quando autorizado. Se a versão 0.6.3 não conseguir abrir, instale o APK corrigido manualmente sobre ela.
+
 O app consulta as releases deste repositório no GitHub ao abrir e a cada 6 horas, ou em Conexão → **Verificar agora**. Só contam tags `vX.Y.Z-kotlin`. Com versão nova, aparece um aviso no topo e um ponto na aba Conexão; as notas abrem numa folha.
+
+Na 0.6.4, o sistema solicita a reabertura pelo resultado da instalação. Atualizações iniciadas por versões anteriores ainda usam a notificação **PC Remote atualizado para X** para abrir a versão nova.
+
+No Android 10 ou mais novo, a reabertura automática exige a autorização opcional **Exibir sobre outros apps**. Antes da primeira atualização, escolha **Abrir ajustes**, selecione **PC Remote** e permita. Essa autorização é persistente e permite ao app voltar sobre outra tela após atualizar. **Só atualizar** continua sem essa autorização; nesse caso, abra pelo ícone ou pela notificação, se habilitada. O Android encerra o processo durante a substituição do APK.
 
 A partir da 0.5.0 a atualização acontece dentro do app:
 

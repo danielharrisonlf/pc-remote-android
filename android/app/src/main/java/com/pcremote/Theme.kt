@@ -77,6 +77,11 @@ internal class UiPreferences(context: Context) {
     get() = prefs.getBoolean("askedUpdateNotice", false)
     set(value) = prefs.edit().putBoolean("askedUpdateNotice", value).apply()
 
+  /** Optional Android special access for returning after replacing our own process. */
+  var askedUpdateReturn: Boolean
+    get() = prefs.getBoolean("askedUpdateReturn", false)
+    set(value) = prefs.edit().putBoolean("askedUpdateReturn", value).apply()
+
   /** RECORD_AUDIO was asked once; after a refusal without rationale, only the settings can grant it. */
   var askedMicrophone: Boolean
     get() = prefs.getBoolean("askedMicrophone", false)

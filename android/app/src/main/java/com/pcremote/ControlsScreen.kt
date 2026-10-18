@@ -47,6 +47,65 @@ internal class ControlsScreen(private val host: ScreenHost) : Screen {
     }
   }
 
+  // Initialize tool definitions before any view builder reads them.
+  private data class DeckItem(val id: String, val label: String, val icon: Int)
+
+  private val deckItems = listOf(
+    DeckItem("show_desktop", "Mostrar Desktop", R.drawable.ic_monitor),
+    DeckItem("switch_window", "Alternar Janela", R.drawable.ic_refresh_cw),
+    DeckItem("task_view", "Visão de Tarefas", R.drawable.ic_monitor_smartphone),
+    DeckItem("screenshot", "Capturar Tela", R.drawable.ic_scan_qr_code),
+    DeckItem("fullscreen", "Tela Cheia (F11)", R.drawable.ic_external_link),
+    DeckItem("calculator", "Calculadora", R.drawable.ic_keyboard),
+    DeckItem("downloads", "Downloads", R.drawable.ic_download),
+    DeckItem("browser", "Navegador", R.drawable.ic_search),
+    DeckItem("task_manager", "Gerenciador", R.drawable.ic_zap),
+    DeckItem("emoji_picker", "Emojis", R.drawable.ic_sun),
+    DeckItem("close_window", "Fechar Janela", R.drawable.ic_x),
+    DeckItem("lock_pc", "Bloquear PC", R.drawable.ic_lock),
+  )
+
+  private data class PadKey(
+    val label: String,
+    val numpadKey: String?,
+    val fallbackText: String?,
+    val fallbackKey: String? = null,
+    val accent: Boolean = false,
+  )
+
+  private val numpadRows = listOf(
+    listOf(
+      PadKey("7", "numpad_7", "7"),
+      PadKey("8", "numpad_8", "8"),
+      PadKey("9", "numpad_9", "9"),
+      PadKey("÷", "numpad_divide", "/"),
+    ),
+    listOf(
+      PadKey("4", "numpad_4", "4"),
+      PadKey("5", "numpad_5", "5"),
+      PadKey("6", "numpad_6", "6"),
+      PadKey("×", "numpad_multiply", "*"),
+    ),
+    listOf(
+      PadKey("1", "numpad_1", "1"),
+      PadKey("2", "numpad_2", "2"),
+      PadKey("3", "numpad_3", "3"),
+      PadKey("−", "numpad_subtract", "-"),
+    ),
+    listOf(
+      PadKey("0", "numpad_0", "0"),
+      PadKey(",", "numpad_comma", ","),
+      PadKey(".", "numpad_decimal", "."),
+      PadKey("+", "numpad_add", "+"),
+    ),
+    listOf(
+      PadKey("Tab", null, null, fallbackKey = "tab"),
+      PadKey("=", null, "="),
+      PadKey("⌫", null, null, fallbackKey = "backspace"),
+      PadKey("Enter", "numpad_enter", null, fallbackKey = "enter", accent = true),
+    ),
+  )
+
   private val segmented = Segmented(
     ui,
     listOf(
@@ -154,23 +213,6 @@ internal class ControlsScreen(private val host: ScreenHost) : Screen {
 
   // --- Quick Deck ---
 
-  private data class DeckItem(val id: String, val label: String, val icon: Int)
-
-  private val deckItems = listOf(
-    DeckItem("show_desktop", "Mostrar Desktop", R.drawable.ic_monitor),
-    DeckItem("switch_window", "Alternar Janela", R.drawable.ic_refresh_cw),
-    DeckItem("task_view", "Visão de Tarefas", R.drawable.ic_monitor_smartphone),
-    DeckItem("screenshot", "Capturar Tela", R.drawable.ic_scan_qr_code),
-    DeckItem("fullscreen", "Tela Cheia (F11)", R.drawable.ic_external_link),
-    DeckItem("calculator", "Calculadora", R.drawable.ic_keyboard),
-    DeckItem("downloads", "Downloads", R.drawable.ic_download),
-    DeckItem("browser", "Navegador", R.drawable.ic_search),
-    DeckItem("task_manager", "Gerenciador", R.drawable.ic_zap),
-    DeckItem("emoji_picker", "Emojis", R.drawable.ic_sun),
-    DeckItem("close_window", "Fechar Janela", R.drawable.ic_x),
-    DeckItem("lock_pc", "Bloquear PC", R.drawable.ic_lock),
-  )
-
   private fun buildDeckCard(): View = ui.card(12).apply {
     addView(ui.cardHeader("Deck de Ações", "Atalhos instantâneos do sistema no PC", stopBtn))
     val grid = ui.column(10)
@@ -206,47 +248,6 @@ internal class ControlsScreen(private val host: ScreenHost) : Screen {
   }
 
   // --- Numpad (123) ---
-
-  private data class PadKey(
-    val label: String,
-    val numpadKey: String?,
-    val fallbackText: String?,
-    val fallbackKey: String? = null,
-    val accent: Boolean = false,
-  )
-
-  private val numpadRows = listOf(
-    listOf(
-      PadKey("7", "numpad_7", "7"),
-      PadKey("8", "numpad_8", "8"),
-      PadKey("9", "numpad_9", "9"),
-      PadKey("÷", "numpad_divide", "/"),
-    ),
-    listOf(
-      PadKey("4", "numpad_4", "4"),
-      PadKey("5", "numpad_5", "5"),
-      PadKey("6", "numpad_6", "6"),
-      PadKey("×", "numpad_multiply", "*"),
-    ),
-    listOf(
-      PadKey("1", "numpad_1", "1"),
-      PadKey("2", "numpad_2", "2"),
-      PadKey("3", "numpad_3", "3"),
-      PadKey("−", "numpad_subtract", "-"),
-    ),
-    listOf(
-      PadKey("0", "numpad_0", "0"),
-      PadKey(",", "numpad_comma", ","),
-      PadKey(".", "numpad_decimal", "."),
-      PadKey("+", "numpad_add", "+"),
-    ),
-    listOf(
-      PadKey("Tab", null, null, fallbackKey = "tab"),
-      PadKey("=", null, "="),
-      PadKey("⌫", null, null, fallbackKey = "backspace"),
-      PadKey("Enter", "numpad_enter", null, fallbackKey = "enter", accent = true),
-    ),
-  )
 
   private fun buildNumpadCard(): View = ui.card(12).apply {
     addView(ui.cardHeader(
