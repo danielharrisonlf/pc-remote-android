@@ -8,6 +8,10 @@ Permissão `allowInput` começa falsa no Windows. Ativação da sessão exige ou
 
 ## Ciclo de vida do touchpad
 
+Desde a 0.6.5, o envio de movimentos mantém cadência de 16 ms e adapta a janela de pedidos sem confirmação ao RTT medido na ativação e nos próprios movimentos (6 a 16 pedidos). Levantar o dedo deixa o último frame sair; cancelar o gesto, sair da View ou pausar o controle descarta os movimentos ainda não enviados. Pedidos já no socket continuam ocupando sua vaga até a confirmação ou falha, inclusive entre gestos.
+
+Movimentos adjacentes são agrupados, e cliques, teclas e rolagem respeitam a ordem dos movimentos anteriores. Sob congestionamento, movimento ainda não enviado com 80 ms de idade é descartado para evitar reproduzir um arrasto antigo na recuperação da conexão. Esse limite não pode retirar pedidos já enviados do socket. Frações de pixel são acumuladas durante movimentos lentos. O parse das mensagens recebidas ocorre fora da thread de interface.
+
 Depois que o PC confirma a ativação, o touchpad fica ligado durante a conexão. Trocar de aba ou receber um Compartilhar não muda nada; abrir o seletor de arquivos é uma pausa, descrita abaixo.
 
 - **Desliga de vez** com **Desligar**, com o fim da conexão (queda, Desconectar, Remover este PC, pareamento novo, ação de emergência do PC), quando o PC bloqueia a entrada (`allowed: false`) ou a desliga por conta própria (`enabled: false` com o celular armado) e quando o PC recusa ou não confirma uma ativação ou uma desativação. Ligar de novo exige tocar em **Ativar touchpad**.

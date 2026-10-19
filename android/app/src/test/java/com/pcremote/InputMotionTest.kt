@@ -68,24 +68,24 @@ class InputMotionTest {
   }
 
   @Test fun slidingWindowCapsInFlightFramesDuringNetworkJitter() {
-    repeat(InputMotion.MAX_IN_FLIGHT) {
+    repeat(InputMotion.MIN_IN_FLIGHT) {
       motion.move(5f, 0f)
       clock += InputMotion.FRAME_MS
     }
-    assertEquals(InputMotion.MAX_IN_FLIGHT, sent.size)
+    assertEquals(InputMotion.MIN_IN_FLIGHT, sent.size)
 
     // Window is full: additional movements accumulate without dispatching until an ACK arrives
     motion.move(20f, 10f)
     motion.move(15f, 5f)
-    assertEquals(InputMotion.MAX_IN_FLIGHT, sent.size)
+    assertEquals(InputMotion.MIN_IN_FLIGHT, sent.size)
 
     // One ACK frees a slot and flushes the accumulated (35, 15) delta immediately
     callbacks.removeAt(0)(null)
-    assertEquals(InputMotion.MAX_IN_FLIGHT + 1, sent.size)
+    assertEquals(InputMotion.MIN_IN_FLIGHT + 1, sent.size)
     assertEquals(35 to 15, sent.last())
   }
 
-  @Test fun cancelResetsWindowAndIgnoresStaleAcks() {
+  @Test fun cancelDiscardsUnsentMotionAndIgnoresStaleAcks() {
     motion.move(10f, 10f)
     clock += 5L
     motion.move(20f, 20f)
@@ -108,5 +108,124 @@ class InputMotionTest {
     // Late callback from second frame is ignored after cancel
     callbacks.removeAt(0)("Outro erro")
     assertEquals(1, failures.size)
+  }
+
+  @Test fun measuredActivationRoundTripKeeps200msLinkMovingAtFrameCadence() {
+    motion.observeRoundTrip(200)
+    repeat(14) {
+      motion.move(3f, -2f)
+      if (it < 13) advanceTime(16)
+    }
+    assertEquals(14, sent.size)
+    assertEquals(42, sent.sumOf { it.first })
+    assertEquals(-28, sent.sumOf { it.second })
+  }
+
+  @Test fun repeatedCancelledGesturesCannotResetRealOutstandingLimit() {
+    repeat(5) {
+      repeat(6) { motion.move(4f, 0f); advanceTime(16) }
+      motion.cancel()
+    }
+    assertEquals(InputMotion.MIN_IN_FLIGHT, sent.size)
+    motion.move(7f, 0f)
+    callbacks.removeAt(0)(null)
+    assertEquals(InputMotion.MIN_IN_FLIGHT + 1, sent.size)
+    assertEquals(7 to 0, sent.last())
+  }
+
+  @Test fun adaptiveWindowRemainsBoundedWithoutAcknowledgements() {
+    motion.observeRoundTrip(2000)
+    repeat(50) { motion.move(4f, 0f); advanceTime(16) }
+    assertEquals(InputMotion.MAX_IN_FLIGHT, sent.size)
+    motion.cancel()
+    repeat(10) { motion.move(4f, 0f); advanceTime(16) }
+    assertEquals(InputMotion.MAX_IN_FLIGHT, sent.size)
+  }
+
+  @Test fun staleCongestedMotionIsNotReplayedWhenConnectionRecovers() {
+    repeat(6) { motion.move(4f, 0f); advanceTime(16) }
+    motion.move(100f, 0f)
+    advanceTime(InputMotion.MAX_PENDING_AGE_MS)
+    callbacks.removeAt(0)(null)
+    assertEquals(6, sent.size)
+    motion.move(2f, 0f)
+    assertEquals(2 to 0, sent.last())
+  }
+
+  @Test fun pendingFinalFrameDrainsWithoutAnotherTouchEvent() {
+    motion.move(4f, 0f)
+    advanceTime(4)
+    motion.move(7f, 2f)
+    advanceTime(12)
+    assertEquals(listOf(4 to 0, 7 to 2), sent)
+  }
+
+  @Test fun clickCannotOvertakePendingMovementAndLaterMovementStaysAfterClick() {
+    motion.move(4f, 0f)
+    advanceTime(4)
+    motion.move(7f, 0f)
+    var clickAt = -1
+    motion.beforeAction { error -> assertEquals(null, error); clickAt = sent.size }
+    motion.move(9f, 0f)
+    assertEquals(-1, clickAt)
+    advanceTime(12)
+    assertEquals(2, clickAt)
+    assertEquals(listOf(4 to 0, 7 to 0), sent)
+    advanceTime(16)
+    assertEquals(9 to 0, sent.last())
+  }
+
+  @Test fun cancellationRejectsQueuedActionAndNeverSendsQueuedMovement() {
+    motion.move(4f, 0f)
+    motion.move(7f, 0f)
+    var result: String? = null
+    motion.beforeAction { result = it }
+    motion.cancel()
+    advanceTime(100)
+    assertEquals("Controle interrompido.", result)
+    assertEquals(listOf(4 to 0), sent)
+  }
+
+  @Test fun slowSubpixelMotionAccumulatesWithoutExpiringPrecision() {
+    motion.move(0.2f, 0f)
+    advanceTime(1000)
+    motion.move(0.2f, 0f)
+    advanceTime(1000)
+    motion.move(0.2f, 0f)
+    assertEquals(listOf(1 to 0), sent)
+    repeat(2) { advanceTime(1000); motion.move(0.2f, 0f) }
+    assertEquals(1, sent.sumOf { it.first })
+  }
+
+  @Test fun duplicateCompletionCannotReleaseAnotherTransportSlot() {
+    repeat(6) { motion.move(4f, 0f); advanceTime(16) }
+    motion.cancel()
+    val first = callbacks.removeAt(0)
+    first(null)
+    first(null)
+    motion.move(9f, 0f)
+    advanceTime(16)
+    motion.move(10f, 0f)
+    assertEquals(7, sent.size)
+  }
+
+  @Test fun synchronousCompletionsDoNotReenterOrStrandTheQueue() {
+    val values = mutableListOf<Int>()
+    val immediate = InputMotion(scheduler, { active }, { dx, _, done -> values += dx; done(null) }, { failures += it }, { clock })
+    repeat(100) { immediate.move(1f, 0f); advanceTime(16) }
+    var completed = false
+    immediate.beforeAction { completed = it == null }
+    assertEquals(100, values.sum())
+    assertEquals(true, completed)
+    assertEquals(emptyList<String>(), failures)
+  }
+
+  @Test fun inactiveAndInvalidMotionNeverReachesTransport() {
+    motion.move(Float.NaN, 0f)
+    motion.move(0f, Float.POSITIVE_INFINITY)
+    active = false
+    motion.move(1f, 1f)
+    advanceTime(100)
+    assertEquals(emptyList<Pair<Int, Int>>(), sent)
   }
 }

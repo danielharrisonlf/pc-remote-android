@@ -1,21 +1,21 @@
 # PC Remote Android
 
-Versão **0.6.4-kotlin**. Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao desktop Rust/Tauri pela LAN, com protocolo 1 e as extensões `input.v1`, `files.v1`, `files.v2`, `search.v1`, `info.v1`, `power.v1`, `clipboard.v2`, `wol.v1`, `numpad.v1`, `presentation.v1` e `deck.v1`.
+Versão **0.6.5-kotlin**. Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao desktop Rust/Tauri pela LAN, com protocolo 1 e as extensões `input.v1`, `files.v1`, `files.v2`, `search.v1`, `info.v1`, `power.v1`, `clipboard.v2`, `wol.v1`, `numpad.v1`, `presentation.v1` e `deck.v1`.
 
 ## Baixar e instalar
 
 | Aplicativo | Download |
 |---|---|
-| Android — APK universal, Android 7/API24+ | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.4-kotlin/pc-remote-android-kotlin-0.6.4-evaluation.apk) |
+| Android — APK universal, Android 7/API24+ | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.5-kotlin/pc-remote-android-kotlin-0.6.5-evaluation.apk) |
 | Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.4/pc-remote-desktop-0.6.4-x64-setup.exe) |
 
-As releases dos dois repositórios são públicas. Veja a [release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.4-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.4). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
+As releases dos dois repositórios são públicas. Veja a [release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.5-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.4). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
 
 Instale o `.exe` no PC e abra o APK pelo gerenciador de arquivos do celular, autorizando a fonte quando solicitado. O app aparece como **PC Remote**, pacote `com.pcremote.nativeandroid`. Somente um controlador pode ficar conectado por PC. O uso não requer root, ADB, acessibilidade ou teclado especial.
 
 ## Tamanho
 
-**APK 0.6.4: 724989 bytes (0.725 MB), cerca de 96.4% menor que os 20.20 MB do antigo app React Native.** A medição sem R8 da 0.6.3 foi de 2.605 MB.
+**APK 0.6.5: 726185 bytes (0.726 MB), cerca de 96.4% menor que os 20.20 MB do antigo app React Native.** A medição sem R8 da 0.6.3 foi de 2.605 MB.
 
 Veja [SIZE.md](docs/SIZE.md) para bytes exatos, hashes e comparação das builds com e sem R8. O tamanho do download difere do espaço instalado e do consumo de RAM. O scanner QR opcional pode baixar módulos externos do Google Play Services, que não fazem parte do APK.
 
@@ -46,6 +46,8 @@ Cinco abas: **Touchpad**, **Controles**, **Mídia**, **Transferir** e **Conexão
 **Mídia fora do app (0.6.1):** com o PC tocando e o app aberto, os controles (anterior, tocar/pausar, próxima) aparecem na notificação, na tela de bloqueio e nos controles de mídia do Android, e continuam com o app em segundo plano. **Fechar** os tira até você abrir o app de novo. O widget **Mídia do PC** (tela inicial) e o bloco **Mídia do PC** (Configurações rápidas) controlam o PC atual e conectam na hora do toque, se preciso.
 
 ## Atualizações
+
+Correção **0.6.5-kotlin**: melhora a fluidez do ponteiro em conexões com maior tempo de resposta, preserva o último movimento ao levantar o dedo e mantém cliques na ordem dos movimentos. A fila de movimentos continua limitada e descarta movimento local antigo durante congestionamento. Veja a [validação](docs/TESTING.md) e as [notas da release](docs/releases/0.6.5-kotlin.md).
 
 Correção **0.6.4-kotlin**: elimina o fechamento na abertura introduzido na 0.6.3 e usa o resultado do instalador do Android para reabrir o app após atualizações iniciadas dentro dele, quando autorizado. Se a versão 0.6.3 não conseguir abrir, instale o APK corrigido manualmente sobre ela.
 

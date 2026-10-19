@@ -90,7 +90,7 @@ internal class TouchPadView(
   @SuppressLint("ClickableViewAccessibility") // finish() calls performClick() for taps.
   override fun onTouchEvent(event: MotionEvent): Boolean {
     if (!isEnabled || !active()) {
-      if (tracking) finish(tap = false)
+      if (tracking) finish(tap = false, cancelled = true)
       return false
     }
     when (event.actionMasked) {
@@ -142,7 +142,7 @@ internal class TouchPadView(
         finish(tap)
         return true
       }
-      MotionEvent.ACTION_CANCEL -> { finish(tap = false); return true }
+      MotionEvent.ACTION_CANCEL -> { finish(tap = false, cancelled = true); return true }
     }
     return false
   }
@@ -161,10 +161,11 @@ internal class TouchPadView(
     return if (count == 0) event.x to event.y else (sumX / count) to (sumY / count)
   }
 
-  private fun finish(tap: Boolean) {
+  private fun finish(tap: Boolean, cancelled: Boolean = false) {
     val pointers = maxPointers
     tracking = false
-    client.cancelPointerMotion()
+    // A normal lift leaves the final frame to drain; cancellation discards it.
+    if (cancelled) { client.cancelScroll(); client.cancelPointerMotion() }
     parent?.requestDisallowInterceptTouchEvent(false)
     hideIndicator()
     if (tap) {
@@ -200,6 +201,9 @@ internal class TouchPadView(
     gridBitmap?.recycle()
     gridBitmap = null
     if (tracking) finish(tap = false)
+    // ACTION_UP may have left a final frame waiting for the next cadence tick.
+    client.cancelScroll()
+    client.cancelPointerMotion()
     super.onDetachedFromWindow()
   }
 

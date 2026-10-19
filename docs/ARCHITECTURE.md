@@ -35,7 +35,7 @@ Android e Windows são repositórios independentes. Protocolo 1 com as extensõe
 | QrScanner.kt / QrScanGate.kt | Scanner pertencente à Activity, uma leitura por vez e descarte após destruição |
 | BackNavigation.kt | APIs exclusivas do Android 13 isoladas por verificação de versão |
 | Protocol.kt | Validação estrita, limites, dedup/revisões e convite QR |
-| InputMotion.kt | Acumulação fracionária, coalescência e um movimento em voo |
+| InputMotion.kt | Acumulação fracionária, agrupamento a 16 ms, janela de 6–16 movimentos em voo por RTT, expiração local e barreiras para ações discretas |
 
 Activity mostra estado do cliente sem manter conexão numa tela. Gerações invalidam callbacks/comandos após troca de sessão. Sem pendências persistidas ou replay. Nenhum toque vibra: o retorno é visual (ripple, rótulos de espera, snackbar) e as Views da fábrica `Ui` desligam `isHapticFeedbackEnabled`. Slider limita envio a 10Hz e aguarda ACK/estado final. As teclas físicas de volume, nas abas Touchpad e Mídia com o PC conectado e áudio disponível, passam pelo mesmo VolumeInteraction: cada toque, inclusive repetição, vai ao próximo múltiplo de 5 a partir do valor pendente, e a rajada termina com o valor final confirmado. Fora dessas condições, ou com um painel aberto, o Android cuida do volume do celular.
 

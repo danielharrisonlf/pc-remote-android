@@ -71,7 +71,7 @@ class RemoteClient(context: Context) : RemoteController {
   private var pointerSeq = 0L
   private var reconnectTask: Runnable? = null
   private val pending = LinkedHashMap<String, Pending>()
-  private data class Pending(val completion:(String?,String?)->Unit,val timeout:Runnable,val generation:Int)
+  private data class Pending(val completion:(String?,String?)->Unit,val timeout:Runnable,val generation:Int,val sentAt:Long,val inputTiming:Boolean)
   private val clipboardSession = ClipboardSession()
   /** clipboard.v2 files: images from the PC in the cache, copies for the PC on their way. */
   private val images = ClipImageFiles(app)
@@ -109,7 +109,15 @@ class RemoteClient(context: Context) : RemoteController {
   private val files = FileTransfer(app.contentResolver,main,{ fileLink() },{ action,done -> send(action,done) },{ v -> if(v.last!=null && v.last!==sendView.last) fileResult=v.last; sendView=v; publishFiles() },{ fail(it) },{ record(it) })
   private val receiver = FileReceiver(app,main,{ fileLink() },{ action,done -> send(action,done) },{ progress,last -> incomingFile=progress; if(last!=null && last!==receiverLast) fileResult=last; receiverLast=last; publishFiles() },{ fail(it) },{ record(it) },{ foreground },{ size -> images.receiveFolder(size) },{ push,file -> clipReceived(push,file) })
   private val motion = InputMotion(main,{ canInput() },{ dx,dy,done -> request(RemoteAction.PointerMove(dx,dy),done) },{ fail(it) })
-  private val scrollMotion = ScrollMotion({ canInput() },{ steps,done -> request(RemoteAction.PointerScroll(steps),done) },{ fail(it) })
+  private var scrollGeneration = 0
+  private val scrollMotion = ScrollMotion({ canInput() },{ steps,done ->
+    val own=scrollGeneration
+    motion.beforeAction { error ->
+      if(own!=scrollGeneration) done("Controle interrompido.")
+      else if(error!=null) done(error)
+      else request(RemoteAction.PointerScroll(steps),done)
+    }
+  },{ fail(it) })
   private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener { main.post { localClipboardChanged() } }
   private var discovery: NsdManager.DiscoveryListener? = null
   private var currentNetwork: Network? = null
@@ -278,7 +286,11 @@ class RemoteClient(context: Context) : RemoteController {
           if(code!=null) { pairId=id; patch { it.copy(status="Pareando") }; ws.send(JSONObject().put("v",1).put("type","pair.request").put("id",id).put("deviceId",e.deviceId).put("deviceName",e.deviceName).put("code",code).toString()) }
           else { helloId=id; ws.send(JSONObject().put("v",1).put("type","hello").put("id",id).put("deviceId",e.deviceId).put("token",e.token).toString()) }
         } }
-        override fun onMessage(ws:WebSocket,text:String) { main.post { if(own!=generation) return@post; val msg=Protocol.parse(text); if(msg==null) { ws.close(1002,null); return@post }; onMessage(ws,msg) } }
+        override fun onMessage(ws:WebSocket,text:String) {
+          // Parse larger state/clipboard frames away from touch dispatch and animation.
+          val msg=Protocol.parse(text)
+          main.post { if(own!=generation) return@post; if(msg==null) { ws.close(1002,null); return@post }; onMessage(ws,msg) }
+        }
         override fun onMessage(ws:WebSocket,bytes:ByteString) { ws.close(1003,null) }
         override fun onClosing(ws:WebSocket,code:Int,reason:String) { ws.close(code,null) }
         override fun onClosed(ws:WebSocket,code:Int,reason:String) { main.post { lost(own) } }
@@ -356,7 +368,14 @@ class RemoteClient(context: Context) : RemoteController {
     val retired=generation
     attempt++; val task=Runnable { if(retired==generation && (foreground || keepAlive) && !requestedDisconnect) { reconnectTask=null; open(true) } }; reconnectTask=task; main.postDelayed(task,delay)
   }
-  private fun complete(id:String,error:String?,code:String?) { val p=pending.remove(id) ?: return; main.removeCallbacks(p.timeout); if(p.generation==generation) p.completion(error,code) }
+  private fun complete(id:String,error:String?,code:String?) {
+    val p=pending.remove(id) ?: return
+    main.removeCallbacks(p.timeout)
+    if(p.generation==generation) {
+      if(error==null && p.inputTiming) motion.observeRoundTrip(android.os.SystemClock.uptimeMillis()-p.sentAt)
+      p.completion(error,code)
+    }
+  }
   private fun rejectPending() { val all=pending.values.toList(); pending.clear(); all.forEach { main.removeCallbacks(it.timeout); it.completion("Conexão interrompida.",null) } }
   private fun request(action:RemoteAction,completion:(String?)->Unit) { send(action) { error,_ -> completion(error) } }
   /** Completes with the PC message and error code; returns the request id once the frame is queued. */
@@ -379,11 +398,11 @@ class RemoteClient(context: Context) : RemoteController {
     if((action is RemoteAction.PowerRun || action is RemoteAction.PowerCancel) && !view.powerSupported) { completion("Atualize o PC Remote no Windows para controlar a energia.",null); return null }
     if(action is RemoteAction.FileOffer && action.clipboard!=null && (!view.clipboardImages || (action.clipboard.automatic && !view.preferences.realtime))) { completion("Envio automático está desativado.",null); return null }
     val continuousPointer = action is RemoteAction.PointerMove || action is RemoteAction.PointerScroll
-    val id = if(continuousPointer) { pointerSeq = (pointerSeq + 1L) and 0xFFFF_FFFF_FFFFL; "00000000-0000-4000-8000-%012x".format(pointerSeq) } else UUID.randomUUID().toString()
+    val id = if(continuousPointer) { pointerSeq = (pointerSeq + 1L) and 0xFFFF_FFFF_FFFFL; "00000000-0000-4000-8000-"+pointerSeq.toString(16).padStart(12,'0') } else UUID.randomUUID().toString()
     val frame=JSONObject().put("v",1).put("type","request").put("id",id).put("action",body).toString()
     if(frame.toByteArray(Charsets.UTF_8).size>Protocol.MAX_FRAME) { completion("Comando muito grande.",null); return null }
     val own=generation; val timeout=Runnable { pending.remove(id)?.completion?.invoke("O PC não confirmou a ação a tempo.",null) }
-    pending[id]=Pending(completion,timeout,own); main.postDelayed(timeout,if(continuousPointer) 2000L else 8000L)
+    pending[id]=Pending(completion,timeout,own,android.os.SystemClock.uptimeMillis(),action is RemoteAction.InputEnable || action is RemoteAction.StateGet); main.postDelayed(timeout,if(continuousPointer) 2000L else 8000L)
     if(socket?.send(frame)!=true) { complete(id,"Conexão interrompida.",null); return null }
     return id
   }
@@ -400,7 +419,10 @@ class RemoteClient(context: Context) : RemoteController {
     if(action is RemoteAction.PointerClick || action is RemoteAction.PointerScroll || action is RemoteAction.KeyboardText || action is RemoteAction.KeyboardKey || action is RemoteAction.PresentationControl || action is RemoteAction.DeckTrigger) {
       if(discretePending) { completion("Aguarde a confirmação do controle anterior."); return@run }
       discretePending=true; val own=inputGeneration
-      request(action) { e -> if(own==inputGeneration) discretePending=false; completion(if(own!=inputGeneration) "Controle interrompido." else e) }
+      motion.beforeAction { barrierError ->
+        if(barrierError!=null) { if(own==inputGeneration) discretePending=false; completion(barrierError) }
+        else request(action) { e -> if(own==inputGeneration) discretePending=false; completion(if(own!=inputGeneration) "Controle interrompido." else e) }
+      }
     } else request(action,completion)
   }
   private fun onState(s:Snapshot) {
@@ -765,7 +787,7 @@ class RemoteClient(context: Context) : RemoteController {
   private fun dropInput() {
     // An interrupted re-arm stays silent: the pause that interrupted it re-arms again later.
     activation?.let { a -> a.timeout?.let(main::removeCallbacks); activation=null; if(!a.automatic) a.completion("Controle interrompido."); startInputDisarm() }
-    inputGeneration++; discretePending=false; motion.cancel(); scrollMotion.cancel(); patch { it.copy(inputArmed=false,inputActivating=false) }
+    inputGeneration++; discretePending=false; scrollGeneration++; scrollMotion.cancel(); motion.cancel(); patch { it.copy(inputArmed=false,inputActivating=false) }
   }
   override fun enableInput(completion:(String?)->Unit) = run {
     // A pause already queued the re-arm behind its disarm.
@@ -829,7 +851,7 @@ class RemoteClient(context: Context) : RemoteController {
   override fun movePointer(dx:Float,dy:Float) = run { motion.move(dx,dy) }
   override fun cancelPointerMotion() = run { motion.cancel() }
   override fun scroll(steps:Int) = run { scrollMotion.add(steps) }
-  override fun cancelScroll() = run { scrollMotion.cancel() }
+  override fun cancelScroll() = run { scrollGeneration++; scrollMotion.cancel() }
   override fun clearReceived() = run { if(view.receivedText.isNotEmpty() || view.receivedImage.isNotEmpty()) patch { it.copy(receivedText="",receivedImage="") } }
   override fun clearError() = run { if(view.error.isNotEmpty()) patch { it.copy(error="") } }
   override fun isInputTextAllowed(text:String)=Protocol.validText(text,1024,true)

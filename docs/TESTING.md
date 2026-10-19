@@ -2,6 +2,25 @@
 
 Registro da alternativa 0.2.0-kotlin em 14/10/2026. Os resultados React Native da branch main não são apresentados como testes desta implementação. Integrações reais: Android SDK/Keystore/OkHttp e Windows Rust/Core Audio/GSMTC/clipboard/SendInput. Não há simulações no produto.
 
+## Correção 0.6.5-kotlin — cadência do ponteiro, 19/10/2026
+
+- `testDebugUnitTest lintRelease assembleRelease assembleDebug`: sucesso; **156 testes passaram**, zero falhas. Lint release: zero erros e 28 avisos.
+- Regressões JVM: cadência e agrupamento; janela adaptada ao RTT; limite real entre gestos cancelados; ACK antigo ou duplicado; erro e cancelamento; expiração sob congestionamento; último frame sem novo evento de toque; ordem movimento → clique → movimento; frações em arrasto lento; callback síncrono; entrada inválida/inativa.
+- Comparação independente com o `InputMotion.kt` real da 0.6.4, congelado no commit `9b0a75c`, em cópias isoladas do projeto Gradle. Relógio, scheduler e ACKs simulados; nenhum movimento do cursor físico. A 0.6.5 recebe uma amostra de RTT de ativação antes dos cenários indicados; o app faz isso com ACKs de `input.enable` e `state.get`. A 0.6.4 não usa essa amostra.
+
+| Entrada e rede simuladas | Maior intervalo entre envios, 0.6.4 | 0.6.5 com RTT de ativação |
+|---|---:|---:|
+| 120 Hz, RTT 100 ms | 20 ms | 16 ms |
+| 120 Hz, RTT 200 ms | 120 ms | 16 ms |
+
+- Cinco gestos cancelados com ACKs retidos: a versão anterior acumulava 30 pedidos realmente sem confirmação embora zerasse o contador interno; a correção manteve 6 nesse cenário sem amostra de RTT. A janela adaptativa tem teto de 16, também coberto por teste unitário.
+- Limites: sem amostra inicial, o primeiro atraso ainda pode ocorrer até o primeiro ACK. O mesmo jitter súbito do baseline conservou intervalo máximo de 70 ms; a pausa de ACKs de 500 ms conservou intervalo de 420 ms. A expiração de 80 ms descarta parte do movimento ainda local sob congestionamento. Não equivale a cancelamento de pedidos já no socket nem elimina a latência da rede.
+- Artefato release: **726.185 bytes**, versionCode 605, SHA-256 `55480613150f71cdb90a82fba7acef278a8ab0f40492dfedd09432e0993d9197`. `apksigner verify --print-certs` confirmou o mesmo certificado da 0.6.4 (`70c09aad2f64bd4a0ff345b63347b7c27c776bc0d52d8b23f9db5a04ac74aa32`).
+- Android 12/API31, AVD dedicado em `emulator-5556`: APK release exato instalado com `adb install -r` sobre a 0.6.4, sem limpar dados. Preferência de sincronização marcada como desativada na 0.6.4 permaneceu desativada na 0.6.5; Maestro aprovou abertura, cinco abas e Deck/123/Slides; buffer de crash vazio. A primeira tentativa, ainda na 0.6.4, encontrou ANR de `com.android.systemui` após boot do emulador; escolher **Wait** estabilizou o sistema e a repetição passou. O emulador pessoal `5554` permaneceu intocado.
+- Integração WSS/TLS da build debug 605 no mesmo API31, com servidor falso sem executor de mouse: pareamento e ativação aprovados com ACKs de `state.get`/`input.enable` atrasados em 200 ms. Um swipe de 700 ms enviou 16 movimentos antes de liberar os ACKs, confirmando que a janela ultrapassou os seis da versão anterior; máximo global 16 pedidos sem confirmação. Após liberar, 16 ACKs e zero pendências, MainActivity em foco e buffer de crash vazio. Esse teste confirma a integração da janela; não mede latência física nem verifica diretamente a corrida de detach. A primeira entrega do convite foi rejeitada por quoting do shell adb, sem conexão; repetir com JSON preservado resolveu a fixture.
+- Evidências locais ignoradas pelo Git em `artifacts/qa/pointer-latency/`: baseline e candidato em CSV, harness, logs Gradle e relatório independente. Semantica indisponível nesta sessão; a memória durável não foi registrada.
+- Celular físico, Wi-Fi real e latência até o cursor desenhado no Windows permanecem sem validação nesta rodada.
+
 ## Correção 0.6.4-kotlin — abertura e retorno da atualização, 18/10/2026
 
 - `testDebugUnitTest lintRelease assembleRelease assembleDebug`: sucesso; **145 testes passaram**, zero falhas. Lint release: zero erros e 28 avisos.
