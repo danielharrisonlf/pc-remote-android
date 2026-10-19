@@ -17,5 +17,6 @@ local.properties
 .env.*
 # Generated binaries and reports
 artifacts/
+release-assets/
 *.apk
 *.aab
