@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.ConnectException
+import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.security.cert.CertificateException
 import javax.net.ssl.SSLHandshakeException
@@ -221,6 +222,11 @@ class DiscoveryEndpointsTest {
   @Test fun connectionErrorsGiveDistinctSafeNetworkGuidance() {
     assertTrue(connectionFailure(SocketTimeoutException()).contains("não respondeu a tempo"))
     assertTrue(connectionFailure(ConnectException()).contains("recusou"))
+    assertTrue(connectionFailure(ConnectException()).contains("endereço"))
+    assertFalse(connectionFailure(ConnectException()).contains("firewall"))
+    assertTrue(connectionFailure(SocketException("Connection refused")).contains("recusou"))
+    assertFalse(connectionFailure(SocketException("Connection refused")).contains("firewall"))
+    assertFalse(connectionFailure(java.io.IOException("arbitrary")).contains("firewall"))
     assertTrue(connectionFailure(SSLHandshakeException("hidden").apply { initCause(CertificateException("fingerprint")) }).contains("identidade"))
     assertFalse(connectionFailure(ConnectException("private address" )).contains("private address"))
   }

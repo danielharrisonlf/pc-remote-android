@@ -2,7 +2,7 @@
 
 | Componente | Versão usada |
 |---|---|
-| Android / desktop | 0.6.8-kotlin (versionCode 608) / 0.6.6 |
+| Android / desktop | 0.6.9-kotlin (versionCode 609) / 0.6.7 |
 | Protocolo | 1 + extensões opcionais input.v1, files.v1, files.v2, search.v1, info.v1, power.v1, clipboard.v2, wol.v1, numpad.v1, presentation.v1 e deck.v1 |
 | Android Gradle Plugin | 9.2.1 |
 | Kotlin integrado ao AGP | 2.2.10, confirmado por buildEnvironment |

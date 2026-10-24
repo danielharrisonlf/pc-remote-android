@@ -33,6 +33,9 @@ import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.ConnectException
 import java.net.NoRouteToHostException
+import java.net.Proxy
+import java.net.Socket
+import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.security.MessageDigest
@@ -43,6 +46,7 @@ import java.util.UUID
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 
@@ -51,11 +55,29 @@ internal fun connectionFailure(error: Throwable): String {
   return when {
     causes.any { it is CertificateException || it is javax.net.ssl.SSLPeerUnverifiedException } -> "A identidade do PC não confere. Confira se é o mesmo PC pareado."
     causes.any { it is javax.net.ssl.SSLException } -> "Falha na conexão segura com o PC. Atualize o app nos dois dispositivos e tente novamente."
-    causes.any { it is ConnectException } -> "O PC recusou a conexão. Abra o app no PC e confira o firewall da rede local."
+    causes.any { it is ConnectException || (it is SocketException && it.message?.contains("refused", ignoreCase = true) == true) } -> "O PC recusou a conexão neste endereço. Confira se o PC Remote está aberto e use o endereço da rede exibido no PC."
     causes.any { it is SocketTimeoutException } -> "O PC não respondeu a tempo. Confira se ambos estão na mesma rede Wi-Fi e se o firewall permite o app."
     causes.any { it is NoRouteToHostException || it is UnknownHostException } -> "Rede indisponível para este PC. Confira a rede Wi-Fi dos dois dispositivos."
-    else -> "Não foi possível conectar ao PC. Confira a rede Wi-Fi e o firewall do PC."
+    else -> "Não foi possível conectar ao PC. Confira se ambos estão na mesma rede Wi-Fi e se o PC Remote está aberto."
   }
+}
+
+/** Records the connected peer while delegating TLS creation and hostname checks unchanged. */
+private class TrackingSslSocketFactory(
+  private val delegate: SSLSocketFactory,
+  private val onSocket: (InetAddress?) -> Unit,
+) : SSLSocketFactory() {
+  override fun getDefaultCipherSuites(): Array<String> = delegate.defaultCipherSuites
+  override fun getSupportedCipherSuites(): Array<String> = delegate.supportedCipherSuites
+  override fun createSocket(socket: Socket, host: String, port: Int, autoClose: Boolean): Socket =
+    record(delegate.createSocket(socket, host, port, autoClose))
+  override fun createSocket(host: String, port: Int): Socket = record(delegate.createSocket(host, port))
+  override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int): Socket =
+    record(delegate.createSocket(host, port, localHost, localPort))
+  override fun createSocket(host: InetAddress, port: Int): Socket = record(delegate.createSocket(host, port))
+  override fun createSocket(address: InetAddress, port: Int, localAddress: InetAddress, localPort: Int): Socket =
+    record(delegate.createSocket(address, port, localAddress, localPort))
+  private fun record(socket: Socket): Socket = socket.also { onSocket(it.inetAddress) }
 }
 
 class RemoteClient(context: Context) : RemoteController {
@@ -81,7 +103,17 @@ class RemoteClient(context: Context) : RemoteController {
   private var authenticated = false
   private var pairCode: String? = null
   private var previousPairEndpoint: PairedComputer? = null
+  private var pairingAddresses: List<String>? = null
   private var pairingHandshake = false
+  private var activeTransportPlan: TransportPlanProgress? = null
+  private data class ActiveTransportAttempt(
+    val plan: TransportPlanProgress,
+    val id: Int,
+    val group: EndpointGroup,
+    val remoteAddress: java.util.concurrent.atomic.AtomicReference<InetAddress?> = java.util.concurrent.atomic.AtomicReference(null),
+    @Volatile var peerAddress: InetAddress? = null,
+  )
+  private var activeTransportAttempt: ActiveTransportAttempt? = null
   private var pairId: String? = null
   private var helloId: String? = null
   private var attempt = 0
@@ -211,9 +243,9 @@ class RemoteClient(context: Context) : RemoteController {
     if(!addressValid(pc.host,pc.port) || !digits.matches(Regex("[0-9]{8}"))) { fail("Digite os 8 dígitos do código."); return@run }
     // No QR means no known identity yet: trust the certificate of this first
     // connection, pin it, and show its colors so the user can compare with the PC.
-    startPairing(pc.host,pc.port,"",digits)
+    startPairing(pc.host,pc.port,"",digits,pc.addresses)
   }
-  private fun startPairing(host:String,port:Int,fingerprint:String,code:String) {
+  private fun startPairing(host:String,port:Int,fingerprint:String,code:String,addresses:List<String> = listOf(host)) {
     if(pairingHandshake) {
       close(false)
       restoreFailedPair()
@@ -221,6 +253,7 @@ class RemoteClient(context: Context) : RemoteController {
     previousPairEndpoint=endpoint?.takeIf { it.token.isNotBlank() } ?: store.restore()
     close(false); forgetFiles()
     requestedDisconnect=false; endpoint=PairedComputer(host,port,fingerprint,UUID.randomUUID().toString(),deviceName())
+    pairingAddresses=(addresses+host).filter(::validConnectionHost).distinctBy { it.lowercase() }.take(MAX_DISCOVERED_ADDRESSES)
     pairingHandshake=true
     pairCode=code; patch { it.copy(status="Pareando",error="",pcName="",pcOs="",snapshot=null,receivedText="",pairingFingerprint=fingerprint) }; open(false)
   }
@@ -233,7 +266,7 @@ class RemoteClient(context: Context) : RemoteController {
     while(result.toByteArray(Charsets.UTF_8).size>80) result=result.dropLast(1).trim()
     return result
   }
-  private fun addressValid(host:String,port:Int)=port in 1..65535 && host.matches(Regex("[a-zA-Z0-9.-]{1,253}")) && !host.contains("..")
+  private fun addressValid(host:String,port:Int)=port in 1..65535 && validConnectionHost(host)
   override fun reconnect() = run { requestedDisconnect=false; autoReconnect() }
   private fun autoReconnect() {
     if(socket != null || requestedDisconnect || pairingHandshake) return
@@ -262,22 +295,29 @@ class RemoteClient(context: Context) : RemoteController {
   private fun close(user:Boolean) {
     requestedDisconnect=user; reconnectTask?.let(main::removeCallbacks); reconnectTask=null
     generation++; retireClipboard(); authenticated=false; clearDisarm(); pairId=null; helloId=null; pairCode=null
+    activeTransportPlan=null; activeTransportAttempt=null
     inputIntent.clear(); dropInput(); rejectPending(); files.connectionEnded(); receiver.connectionEnded(); volumeTask?.let(main::removeCallbacks); volumeTask=null; finalVolumeTimeout?.let(main::removeCallbacks); finalVolumeTimeout=null; finalVolume=null
     socket?.close(1000,"Desconectado"); socket=null; client?.dispatcher?.executorService?.shutdown(); client=null
   }
   private fun restoreFailedPair() {
     endpoint=previousPairEndpoint
-    pairingHandshake=false; previousPairEndpoint=null
+    pairingHandshake=false; previousPairEndpoint=null; pairingAddresses=null
   }
   private fun open(reconnecting:Boolean) {
-    val saved=endpoint ?: return
-    val e=if(pairingHandshake) saved else discoveredEndpoint(saved,view.discovered).also { endpoint=it }
+    if(socket!=null || activeTransportPlan!=null) return
+    val e=endpoint ?: return
     reconnectTask?.let(main::removeCallbacks); reconnectTask=null
     generation++; val own=generation; retireClipboard(); authenticated=false; clearDisarm(); inputIntent.clear(); dropInput(); rejectPending(); files.connectionEnded(); receiver.connectionEnded()
     patch { it.copy(status=if(pairingHandshake) "Pareando" else if(reconnecting) "Reconectando" else "Conectando",snapshot=null,inputSupported=false,numpadSupported=false,presentationSupported=false,deckSupported=false,filesSupported=false,filesTwoWay=false,searchSupported=false) }
     // Only a code pairing starts without a pinned identity; every other connection pins.
     val firstUse=e.fingerprint.isEmpty() && pairCode!=null
     if(e.fingerprint.isEmpty() && !firstUse) { fail("Pareie este PC de novo."); lost(own); return }
+    val groups=if(pairingHandshake && pairCode!=null) {
+      pairingConnectionPlan(DiscoveredComputer(e.pcName.ifBlank { "PC" },e.host,e.port,e.pcId,addresses=pairingAddresses ?: listOf(e.host)))
+    } else connectionPlan(e,view.discovered)
+    if(groups.isEmpty()) { fail("Não há um endereço válido para este PC."); lost(own); return }
+    val plan=TransportPlanProgress(groups)
+    activeTransportPlan=plan; activeTransportAttempt=null
     val observed=java.util.concurrent.atomic.AtomicReference<String?>(null)
     try {
       val trust=object:X509TrustManager {
@@ -287,46 +327,125 @@ class RemoteClient(context: Context) : RemoteController {
           if(chain.size!=1) throw CertificateException("chain")
           chain[0].checkValidity()
           val digest=MessageDigest.getInstance("SHA-256").digest(chain[0].encoded).joinToString("") { "%02x".format(it) }
-          // First use pins whatever the first handshake saw; later sockets of this client, such as /v1/files, must match it.
+          // A first-use code pairing may observe one identity for this entire endpoint plan.
           if(firstUse) { if(!observed.compareAndSet(null,digest) && observed.get()!=digest) throw CertificateException("fingerprint") }
           else if(digest!=e.fingerprint) throw CertificateException("fingerprint")
         }
       }
       val ssl=SSLContext.getInstance("TLS").apply { init(null,arrayOf<TrustManager>(trust),SecureRandom()) }
-      client=OkHttpClient.Builder().sslSocketFactory(ssl.socketFactory,trust).dns(object:Dns {
+      openTransportAttempt(own,e,plan,firstUse,observed,plan.current()!!,trust,ssl.socketFactory)
+    } catch (_:Exception) { fail("Não foi possível conectar ao PC."); lost(own) }
+  }
+  private fun openTransportAttempt(
+    own:Int,
+    endpointIdentity:PairedComputer,
+    plan:TransportPlanProgress,
+    firstUse:Boolean,
+    observed:java.util.concurrent.atomic.AtomicReference<String?>,
+    attempt:TransportAttempt,
+    trust:X509TrustManager,
+    sslSocketFactory:SSLSocketFactory,
+  ) {
+    if(own!=generation || activeTransportPlan!==plan || !plan.isCurrent(attempt.id)) return
+    val context=ActiveTransportAttempt(plan,attempt.id,attempt.group)
+    activeTransportAttempt=context
+    try {
+      val dns=object:Dns {
         override fun lookup(hostname:String):List<InetAddress> {
           if(hostname!="pc-remote.local") throw UnknownHostException(hostname)
-          return InetAddress.getAllByName(e.host).filterIsInstance<Inet4Address>().ifEmpty { throw UnknownHostException(e.host) }
-        }
-      }).connectTimeout(8,TimeUnit.SECONDS).pingInterval(20,TimeUnit.SECONDS).build()
-      // Separate header lines: PCs up to 0.3 read only the first value and keep input.v1 working; older PCs ignore the tokens they do not know.
-      val request=Request.Builder().url("wss://pc-remote.local:${e.port}/v1/ws")
-      for(feature in FEATURES) request.addHeader("X-PC-Remote-Features",feature)
-      socket=client!!.newWebSocket(request.build(),object:WebSocketListener() {
-        override fun onOpen(ws:WebSocket,response:Response) { main.post {
-          if(own!=generation) { ws.close(1000,null); return@post }
-          if(firstUse) {
-            val fingerprint=observed.get()
-            if(fingerprint==null) { ws.close(1000,null); fail("Não foi possível verificar o PC."); lost(own); return@post }
-            endpoint=endpoint?.copy(fingerprint=fingerprint)
-            patch { it.copy(pairingFingerprint=fingerprint) }
+          val resolved=LinkedHashMap<String,Inet4Address>()
+          for(host in attempt.group.hosts) {
+            if(!validConnectionHost(host)) continue
+            try {
+              InetAddress.getAllByName(host).filterIsInstance<Inet4Address>().forEach { address -> address.hostAddress?.let { ip -> resolved.putIfAbsent(ip,address) } }
+            } catch (_:UnknownHostException) { /* Continue through this identity's remaining endpoints. */ }
+            if(resolved.size>=MAX_DISCOVERED_ADDRESSES+1) break
           }
-          val e=endpoint ?: return@post
-          val id=UUID.randomUUID().toString(); val code=pairCode
-          if(code!=null) { pairId=id; patch { it.copy(status="Pareando") }; ws.send(JSONObject().put("v",1).put("type","pair.request").put("id",id).put("deviceId",e.deviceId).put("deviceName",e.deviceName).put("code",code).toString()) }
-          else { helloId=id; ws.send(JSONObject().put("v",1).put("type","hello").put("id",id).put("deviceId",e.deviceId).put("token",e.token).toString()) }
-        } }
+          if(resolved.isEmpty()) throw UnknownHostException(attempt.group.hosts.joinToString(","))
+          return resolved.values.toList()
+        }
+      }
+      val trackedFactory=TrackingSslSocketFactory(sslSocketFactory) { context.remoteAddress.set(it) }
+      val nextClient=OkHttpClient.Builder()
+        .proxy(Proxy.NO_PROXY)
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .retryOnConnectionFailure(true)
+        .sslSocketFactory(trackedFactory,trust)
+        .dns(dns)
+        .connectTimeout(8,TimeUnit.SECONDS)
+        .pingInterval(20,TimeUnit.SECONDS)
+        .build()
+      client=nextClient
+      // Separate header lines: PCs up to 0.3 read only the first value and keep input.v1 working; older PCs ignore the tokens they do not know.
+      val request=Request.Builder().url("wss://pc-remote.local:${attempt.group.port}/v1/ws")
+      for(feature in FEATURES) request.addHeader("X-PC-Remote-Features",feature)
+      socket=nextClient.newWebSocket(request.build(),object:WebSocketListener() {
+        override fun onOpen(ws:WebSocket,response:Response) {
+          // Freeze the actual TLS peer before posting; the client may later carry file transfers.
+          context.peerAddress=context.remoteAddress.get()
+          if(!plan.markOpened(attempt.id)) { ws.close(1000,null); return }
+          main.post {
+            if(own!=generation || activeTransportPlan!==plan || activeTransportAttempt!==context || !plan.hasOpened(attempt.id)) { ws.close(1000,null); return@post }
+            if(firstUse) {
+              val fingerprint=observed.get()
+              if(fingerprint==null) { ws.close(1000,null); fail("Não foi possível verificar o PC."); lost(own); return@post }
+              endpoint=endpoint?.copy(fingerprint=fingerprint)
+              patch { it.copy(pairingFingerprint=fingerprint) }
+            }
+            val e=endpoint ?: return@post
+            val id=UUID.randomUUID().toString(); val code=pairCode
+            if(code!=null) { pairId=id; patch { it.copy(status="Pareando") }; ws.send(JSONObject().put("v",1).put("type","pair.request").put("id",id).put("deviceId",e.deviceId).put("deviceName",e.deviceName).put("code",code).toString()) }
+            else { helloId=id; ws.send(JSONObject().put("v",1).put("type","hello").put("id",id).put("deviceId",e.deviceId).put("token",e.token).toString()) }
+          }
+        }
         override fun onMessage(ws:WebSocket,text:String) {
           // Parse larger state/clipboard frames away from touch dispatch and animation.
           val msg=Protocol.parse(text)
-          main.post { if(own!=generation) return@post; if(msg==null) { ws.close(1002,null); return@post }; onMessage(ws,msg) }
+          main.post {
+            if(own!=generation || activeTransportPlan!==plan || activeTransportAttempt!==context || !plan.hasOpened(attempt.id)) return@post
+            if(msg==null) { ws.close(1002,null); return@post }
+            onMessage(ws,msg)
+          }
         }
         override fun onMessage(ws:WebSocket,bytes:ByteString) { ws.close(1003,null) }
         override fun onClosing(ws:WebSocket,code:Int,reason:String) { ws.close(code,null) }
-        override fun onClosed(ws:WebSocket,code:Int,reason:String) { main.post { lost(own) } }
-        override fun onFailure(ws:WebSocket,t:Throwable,response:Response?) { main.post { if(own==generation) { if(!poweringOff()) fail(connectionFailure(t)); lost(own) } } }
+        override fun onClosed(ws:WebSocket,code:Int,reason:String) {
+          main.post { if(own==generation && activeTransportPlan===plan && activeTransportAttempt===context && plan.hasOpened(attempt.id)) lost(own) }
+        }
+        override fun onFailure(ws:WebSocket,t:Throwable,response:Response?) {
+          val current=own==generation && activeTransportPlan===plan && activeTransportAttempt===context && (plan.isCurrent(attempt.id) || plan.hasOpened(attempt.id))
+          if(!current) return
+          val next=if(response==null && !plan.hasOpened(attempt.id) && !containsTlsIdentityFailure(t) && isPreOpenTransportFailure(t)) plan.advanceAfterPreOpenFailure(attempt.id) else null
+          if(next!=null) {
+            main.post {
+              if(own!=generation || activeTransportPlan!==plan || !plan.isCurrent(next.id)) return@post
+              if(activeTransportAttempt===context) activeTransportAttempt=null
+              if(socket===ws) socket=null
+              client?.dispatcher?.executorService?.shutdown()
+              openTransportAttempt(own,endpointIdentity,plan,firstUse,observed,next,trust,sslSocketFactory)
+            }
+          } else main.post {
+            if(own!=generation || activeTransportPlan!==plan || activeTransportAttempt!==context) return@post
+            plan.finish(attempt.id)
+            if(!poweringOff()) fail(connectionFailure(t))
+            lost(own)
+          }
+        }
       })
-    } catch (_:Exception) { fail("Não foi possível conectar ao PC."); lost(own) }
+    } catch (_:Exception) {
+      if(own==generation && activeTransportPlan===plan && activeTransportAttempt===context) {
+        plan.finish(attempt.id); fail("Não foi possível conectar ao PC."); lost(own)
+      }
+    }
+  }
+  private fun containsTlsIdentityFailure(error:Throwable):Boolean {
+    val causes=generateSequence(error) { it.cause }.take(8).toList()
+    return causes.any { it is CertificateException || it is javax.net.ssl.SSLPeerUnverifiedException || it is javax.net.ssl.SSLException }
+  }
+  private fun isPreOpenTransportFailure(error:Throwable):Boolean {
+    val causes=generateSequence(error) { it.cause }.take(8).toList()
+    return causes.any { it is ConnectException || it is NoRouteToHostException || it is SocketTimeoutException || it is UnknownHostException || it is SocketException }
   }
   private fun onMessage(ws:WebSocket,msg:Incoming) {
     when(msg) {
@@ -340,7 +459,9 @@ class RemoteClient(context: Context) : RemoteController {
       }
       is Incoming.Welcome -> {
         if(helloId!=msg.id || endpoint?.pcId!=msg.pcId || endpoint?.token.isNullOrBlank()) { ws.close(1002,null); return }
-        if(msg.macs.isNotEmpty()) endpoint=endpoint?.copy(macs=msg.macs)
+        val winning=activeTransportAttempt?.takeIf { it.plan===activeTransportPlan && it.plan.hasOpened(it.id) }
+        val winningIp=(winning?.peerAddress as? Inet4Address)?.hostAddress
+        endpoint=endpoint?.let { current -> current.copy(host=winningIp ?: current.host,port=winning?.group?.port ?: current.port,macs=msg.macs.ifEmpty { current.macs }) }
         if(pairingHandshake && !store.canAdd(PcList.key(endpoint!!))) { close(true); restoreFailedPair(); patch { it.copy(status="Desconectado",error="Este celular já guarda ${PcList.MAX} PCs. Remova um em Conexão para adicionar outro.",pcName=endpoint?.pcName.orEmpty(),pcOs=store.currentOs(),pairingFingerprint="",snapshot=null) }; return }
         if(pairingHandshake) try { store.persist(endpoint!!) } catch (_:Exception) {
           close(true)
@@ -349,7 +470,7 @@ class RemoteClient(context: Context) : RemoteController {
           return
         }
         val wasPairing=pairingHandshake
-        helloId=null; pairingHandshake=false; previousPairEndpoint=null; authenticated=true; attempt=0; clipboardSession.retire()
+        helloId=null; pairingHandshake=false; previousPairEndpoint=null; pairingAddresses=null; authenticated=true; attempt=0; clipboardSession.retire()
         // Only a 0.6 PC (info.v1 or files.v2 in the welcome) keeps an emergency stop as a block;
         // an older PC ends it by closing the socket, so arming by itself there would undo it.
         if(msg.os.isNotEmpty() || msg.fileReceive) inputIntent.connected() else inputIntent.clear()
@@ -387,6 +508,7 @@ class RemoteClient(context: Context) : RemoteController {
     if(own!=generation) return
     // Fence all callbacks from the retired socket before they can schedule another retry.
     generation++
+    activeTransportPlan=null; activeTransportAttempt=null
     retireClipboard()
     reconnectTask?.let(main::removeCallbacks); reconnectTask=null
     if(pairingHandshake) { restoreFailedPair(); requestedDisconnect=true }
@@ -841,19 +963,19 @@ class RemoteClient(context: Context) : RemoteController {
   }
   private fun publishDiscovered(info:NsdServiceInfo,modern:Boolean) {
     val addresses=if(modern && Build.VERSION.SDK_INT>=34) info.hostAddresses else listOfNotNull(info.host)
-    val host=addresses.filterIsInstance<Inet4Address>().firstOrNull()?.hostAddress
+    val ipv4=addresses.filterIsInstance<Inet4Address>().mapNotNull { it.hostAddress?.takeIf { address -> addressValid(address,info.port) } }.distinct().take(MAX_DISCOVERED_ADDRESSES)
+    val host=ipv4.firstOrNull()
     if(host==null || !addressValid(host,info.port)) { removeDiscoveredService(info.serviceName); return }
     val advertised=info.attributes["id"]?.toString(Charsets.UTF_8).orEmpty()
     val serviceName=info.serviceName
-    val item=DiscoveredComputer(serviceName,host,info.port,advertised,serviceName)
+    val item=DiscoveredComputer(serviceName,host,info.port,advertised,serviceName,ipv4)
     val discovered=(view.discovered.filterNot { old ->
       if(advertised.isNotEmpty()) old.id==advertised || old.serviceName==serviceName || old.serviceName.isEmpty() && old.name==serviceName
       else old.serviceName==serviceName || old.serviceName.isEmpty() && old.name==serviceName
     }+item).takeLast(50)
     patch { it.copy(discovered=discovered) }
     val e=endpoint
-    if(e!=null && foreground && !requestedDisconnect && socket==null && e.token.isNotBlank() && e.pcId==advertised) {
-      endpoint=discoveredEndpoint(e,view.discovered)
+    if(e!=null && foreground && !requestedDisconnect && socket==null && activeTransportPlan==null && e.token.isNotBlank() && e.pcId==advertised) {
       open(true)
     }
   }
@@ -1040,7 +1162,7 @@ class RemoteClient(context: Context) : RemoteController {
     if(pairingHandshake) { close(false); restoreFailedPair() }
     try { store.select(id) } catch (_:Exception) { patch { it.copy(status="Desconectado",error="Não foi possível trocar de PC. Tente novamente.",pcName=endpoint?.pcName.orEmpty(),pcOs=store.currentOs(),pairingFingerprint="") }; return@run }
     // Like removing a PC: nothing queued, in flight or listed for one PC may reach another.
-    close(true); forgetFiles(); endpoint=discoveredEndpoint(target,view.discovered); attempt=0
+    close(true); forgetFiles(); endpoint=target; attempt=0
     patch { it.copy(status="Desconectado",error="",pcName=target.pcName,pcOs=store.currentOs(),pairingFingerprint="",snapshot=null,receivedText="",computers=store.computers()) }
     requestedDisconnect=false; autoReconnect()
   }

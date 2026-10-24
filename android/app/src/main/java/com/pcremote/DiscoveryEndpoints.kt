@@ -149,3 +149,96 @@ internal fun discoveredEndpoint(saved: PairedComputer, found: List<DiscoveredCom
   val match = found.lastOrNull { saved.pcId.isNotBlank() && it.id == saved.pcId }
   return if (match == null) saved else saved.copy(host = match.host, port = match.port)
 }
+
+/** Bound addresses per advertisement so a malformed service cannot create an unbounded plan. */
+internal const val MAX_DISCOVERED_ADDRESSES = 16
+
+/** One DNS/TCP group. OkHttp tries each resolved IPv4 route in order before this group fails. */
+internal data class EndpointGroup(val port: Int, val hosts: List<String>)
+
+internal data class TransportAttempt(val id: Int, val group: EndpointGroup)
+
+/**
+ * Immutable ordered endpoints plus a small synchronized callback fence. An opened WebSocket
+ * permanently disables endpoint fallback for this plan, even before its main-thread callback runs.
+ */
+internal class TransportPlanProgress(groups: List<EndpointGroup>) {
+  private val groups = groups.map { it.copy(hosts = it.hosts.toList()) }.toList()
+  private var currentIndex = 0
+  private var openedIndex = -1
+  private var finished = false
+
+  @Synchronized fun current(): TransportAttempt? =
+    if (!finished && currentIndex in groups.indices) TransportAttempt(currentIndex, groups[currentIndex]) else null
+
+  @Synchronized fun isCurrent(attemptId: Int) = !finished && currentIndex == attemptId
+
+  /** Called synchronously from OkHttp's onOpen, before posting any protocol work to the main thread. */
+  @Synchronized fun markOpened(attemptId: Int): Boolean {
+    if (finished || currentIndex != attemptId) return false
+    openedIndex = attemptId
+    return true
+  }
+
+  @Synchronized fun hasOpened(attemptId: Int) = openedIndex == attemptId
+
+  /** Advances only for the current attempt before onOpen; stale or opened attempts cannot advance. */
+  @Synchronized fun advanceAfterPreOpenFailure(attemptId: Int): TransportAttempt? {
+    if (finished || currentIndex != attemptId || openedIndex == attemptId) return null
+    currentIndex++
+    if (currentIndex !in groups.indices) {
+      finished = true
+      return null
+    }
+    return TransportAttempt(currentIndex, groups[currentIndex])
+  }
+
+  @Synchronized fun finish(attemptId: Int): Boolean {
+    if (finished || currentIndex != attemptId) return false
+    finished = true
+    return true
+  }
+}
+
+/** The target identity is matched first; unrelated discovered PCs are never candidates. */
+internal fun connectionPlan(saved: PairedComputer, found: List<DiscoveredComputer>): List<EndpointGroup> {
+  val match = found.lastOrNull { saved.pcId.isNotBlank() && it.id == saved.pcId }
+  val groups = LinkedHashMap<Int, MutableList<String>>()
+  if (match != null && validConnectionHost(match.host) && match.port in 1..65535) {
+    val addresses = (listOf(match.host) + match.addresses.filter(::isIpv4Literal))
+      .asSequence()
+      .filter(::validConnectionHost)
+      .distinctBy { it.lowercase() }
+      .take(MAX_DISCOVERED_ADDRESSES)
+    groups.getOrPut(match.port) { mutableListOf() }.addAll(addresses)
+  }
+  if (validConnectionHost(saved.host) && saved.port in 1..65535) {
+    val hosts = groups.getOrPut(saved.port) { mutableListOf() }
+    if (hosts.none { it.equals(saved.host, ignoreCase = true) }) hosts.add(saved.host)
+  }
+  return groups.map { (port, hosts) -> EndpointGroup(port, hosts.toList()) }.toList()
+}
+
+/** A code-pairing plan accepts addresses only from the PC the user selected. */
+internal fun pairingConnectionPlan(selected: DiscoveredComputer): List<EndpointGroup> {
+  if (selected.port !in 1..65535) return emptyList()
+  val hosts = (listOf(selected.host) + selected.addresses.filter(::isIpv4Literal))
+    .asSequence()
+    .filter(::validConnectionHost)
+    .distinctBy { it.lowercase() }
+    .take(MAX_DISCOVERED_ADDRESSES)
+    .toList()
+  return if (hosts.isEmpty()) emptyList() else listOf(EndpointGroup(selected.port, hosts))
+}
+
+/** Allows explicit IPv4/IPv6-free DNS names for QR/manual endpoints as well as IPv4 literals. */
+internal fun validConnectionHost(host: String): Boolean =
+  host.length in 1..253 && host.matches(Regex("[a-zA-Z0-9.-]+")) && !host.contains("..") &&
+    !host.startsWith('.')
+
+internal fun isIpv4Literal(host: String): Boolean {
+  val pieces = host.split('.')
+  return pieces.size == 4 && pieces.all { piece ->
+    piece.isNotEmpty() && piece.all(Char::isDigit) && piece.toIntOrNull()?.let { it in 0..255 } == true
+  }
+}

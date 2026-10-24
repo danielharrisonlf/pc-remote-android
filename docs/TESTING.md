@@ -2,6 +2,13 @@
 
 Registro da alternativa 0.2.0-kotlin em 14/10/2026. Os resultados React Native da branch main não são apresentados como testes desta implementação. Integrações reais: Android SDK/Keystore/OkHttp e Windows Rust/Core Audio/GSMTC/clipboard/SendInput. Não há simulações no produto.
 
+## Release 0.6.9-kotlin — fallback de transporte e mensagens, 24/10/2026
+
+- `versionCode` 609, `versionName` `0.6.9-kotlin`. `testDebugUnitTest compileDebugKotlin`: sucesso; **174 testes em 25 suítes**, zero falhas/erros/ignorados. Regressões adicionadas para planejamento de múltiplos endereços (mDNS + manual), fallback determinístico após recusa e mensagens sem menção indevida a firewall quando a porta respondeu recusando a conexão.
+- `assembleRelease lintRelease assembleSizeBaseline`: sucesso com R8 habilitado. Lint: zero erros, 32 avisos esperados.
+- APK release com R8: **771561 bytes**, SHA-256 `35fe317b8edf6936e2de47f6f7201bd3f14cc4ae641e2026b1de135e07f3d5e1`. Assinatura v2 conferida com `apksigner`: certificado SHA-256 `70c09aad2f64bd4a0ff345b63347b7c27c776bc0d52d8b23f9db5a04ac74aa32`.
+- Assets preparados em `release-assets/0.6.9/`: `pc-remote-android-kotlin-0.6.9-evaluation.apk` e `KOTLIN-SHA256SUMS-0.6.9.txt`.
+
 ## Correção 0.6.8-kotlin — pareamento e descoberta, 24/10/2026
 
 - `versionCode` 608, `versionName` `0.6.8-kotlin`. `testDebugUnitTest compileDebugKotlin`: sucesso; **171 testes em 24 suítes**, zero falhas/erros/ignorados. As regressões cobrem retries espaçados em 1/2/4 segundos, continuidade dos PCs prontos, recuperação no mesmo callback após perda temporária e invalidação por perda definitiva ou fim da busca.

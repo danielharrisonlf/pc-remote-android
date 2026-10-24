@@ -10,7 +10,7 @@ import android.content.Intent
  * the code and approval on the PC, and the certificate is pinned as usual.
  *
  * adb shell am broadcast -n com.pcremote.nativeandroid/com.pcremote.DebugInviteReceiver --es invite '<QR JSON>'
- * adb shell am broadcast -a com.pcremote.DEBUG_PAIR_WITH_CODE -n com.pcremote.nativeandroid/com.pcremote.DebugInviteReceiver --es pcHost 10.0.2.2 --ei pcPort 43127 --es pcName 'PC A' --es pcId '<UUID>' --es pairCode 12345678
+ * adb shell am broadcast -a com.pcremote.DEBUG_PAIR_WITH_CODE -n com.pcremote.nativeandroid/com.pcremote.DebugInviteReceiver --es pcHost 10.0.2.2 --es pcAddresses '10.0.2.2,192.168.1.20' --ei pcPort 43127 --es pcName 'PC A' --es pcId '<UUID>' --es pairCode 12345678
  */
 class DebugInviteReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
@@ -20,7 +20,8 @@ class DebugInviteReceiver : BroadcastReceiver() {
       val name=intent.getStringExtra("pcName").orEmpty().ifBlank { "PC no endereço" }
       val id=intent.getStringExtra("pcId").orEmpty()
       val code=intent.getStringExtra("pairCode") ?: return
-      (context.applicationContext as RemoteApplication).client.pairWithCode(DiscoveredComputer(name,host,port,id),code)
+      val addresses=intent.getStringExtra("pcAddresses")?.split(',')?.map(String::trim)?.filter(String::isNotEmpty)?.ifEmpty { listOf(host) } ?: listOf(host)
+      (context.applicationContext as RemoteApplication).client.pairWithCode(DiscoveredComputer(name,host,port,id,addresses=addresses),code)
       return
     }
     val invite = intent.getStringExtra("invite")?.let(Protocol::parseInvite) ?: return

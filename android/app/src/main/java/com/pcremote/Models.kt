@@ -13,7 +13,15 @@ data class PowerState(val allowed: Boolean, val scheduled: PowerSchedule?)
 data class PowerSchedule(val action: String, val remainingSeconds: Long)
 /** The only connection preference: clipboard sync in both directions. Manual sends never depend on it. */
 data class Preferences(val realtime: Boolean = true)
-data class DiscoveredComputer(val name: String, val host: String, val port: Int, val id: String = "", val serviceName: String = "")
+data class DiscoveredComputer(
+    val name: String,
+    val host: String,
+    val port: Int,
+    val id: String = "",
+    val serviceName: String = "",
+    /** All valid IPv4 adapters announced by this PC. Legacy/manual instances still use [host]. */
+    val addresses: List<String> = listOf(host),
+)
 data class Invite(val host: String, val port: Int, val fingerprint: String, val code: String)
 /** [received] counts what the other side confirmed (sending) or what was written (receiving). */
 data class FileProgress(val name: String, val size: Long, val received: Long, val streaming: Boolean)
