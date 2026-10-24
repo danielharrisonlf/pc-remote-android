@@ -2,6 +2,26 @@
 
 Registro da alternativa 0.2.0-kotlin em 14/10/2026. Os resultados React Native da branch main não são apresentados como testes desta implementação. Integrações reais: Android SDK/Keystore/OkHttp e Windows Rust/Core Audio/GSMTC/clipboard/SendInput. Não há simulações no produto.
 
+## Release 0.6.7-kotlin — validação para publicação, 24/10/2026
+
+- `versionCode` 607 e `versionName` `0.6.7-kotlin`, pacote `com.pcremote.nativeandroid`. A assinatura v2 foi conferida contra o APK 0.6.6 baixado da release publicada: mesmo certificado SHA-256 `70c09aad2f64bd4a0ff345b63347b7c27c776bc0d52d8b23f9db5a04ac74aa32`.
+- `testDebugUnitTest assembleRelease lintRelease --no-daemon --console=plain`: sucesso em 58 s; 24 suítes, **166 testes passaram**, zero falhas/erros/ignorados. Lint: zero erros e 28 avisos.
+- APK universal otimizado: **762593 bytes**; SHA-256 `d9296110b67b550235ca9e006acdef41fb297a9b1bcef6c79e9029260a6895a4`. Assets: `pc-remote-android-kotlin-0.6.7-evaluation.apk` e `KOTLIN-SHA256SUMS-0.6.7.txt` em `release-assets/0.6.7/`.
+- Evidências desta build: `artifacts/release-0.6.7/gradle-final.log` e `validation.txt`. A revisão de código e a validação visual da correção estão no registro de 23/10 abaixo; para a release foram alterados somente versão e documentação. A conexão com dois PCs físicos continua não verificada.
+
+## Correção local — conexão com outro PC, 23/10/2026
+
+- Ao trocar de PC, o cliente consultava o endereço salvo mesmo quando já havia descoberto um IP novo para o mesmo `pcId`. Agora consulta a descoberta antes de abrir cada conexão; certificado e token continuam sendo os do pareamento salvo. O endereço atualizado só é persistido depois do `welcome` autenticado.
+- O início da conexão sobrescrevia `Pareando` por `Conectando`, ocultando o estado de espera e cancelamento. O pareamento conserva seu estado até terminar; durante a espera, oculta o nome do PC anterior e os cartões de PC salvo e energia. Um endereço temporário não é mais apresentado como PC pareado. Falha ou cancelamento restaura o PC anterior; uma falha ao adicionar outro PC não inicia uma reconexão automática ao anterior que esconda o resultado.
+- Resoluções mDNS agora usam fila limitada e uma operação nativa por vez, inclusive entre parar e reiniciar a descoberta. Callbacks de buscas anteriores liberam a operação sem publicar dados antigos. A descoberta usa IPv4 entre os endereços disponíveis na API 34+, e mantém o multicast lock somente durante a busca. Veja as referências oficiais de [NsdManager](https://developer.android.com/reference/android/net/nsd/NsdManager) e [NsdServiceInfo](https://developer.android.com/reference/android/net/nsd/NsdServiceInfo).
+- Falhas de certificado, conexão segura, tempo limite, conexão recusada e rede indisponível têm orientações distintas, sem mostrar mensagens internas de exceções.
+- `testDebugUnitTest assembleDebug assembleRelease lintRelease`: sucesso. **166 testes passaram**, zero falhas/erros/ignorados; 10 regressões novas cobrem seleção de IP com identidade preservada, fila serial, resolução antiga ainda ativa, callback duplicado, serviço perdido/reencontrado, limite da fila e classificação de falhas. Lint: zero erros e 28 avisos.
+- Revisão independente aprovou o candidato após corrigir o controle da operação nativa de descoberta. APK release com assinatura v2 validada; versão local permanece `0.6.6-kotlin`, sem publicação.
+- Emulador Ritual_Pixel, Android 16/API 36, sessão somente leitura: o candidato final mostra `Pareando`, `Conectando…` e `Cancelar`, sem o cartão indevido de PC pareado/energia (`07-candidate-waiting-final.png`). Falha de rede retorna ao formulário com orientação de tempo limite, sem crash. Cancelamento foi observado em `05-candidate-cancelled.png`, antes do ajuste final de visibilidade; na última captura (`08`), o tempo limite pode ter ocorrido antes do toque, portanto ela não comprova a ordem entre cancelar e expirar. A restauração de um PC anterior e a descoberta real de dois PCs não foram verificadas no emulador.
+- APK final: `artifacts/qa/network-other-pc/20261023/pc-remote-android-release.apk`; SHA-256 `3770b8cbe87d640de5e79c4c4d73675f70a438ec6b90b8149fee8fd91aad2b13`.
+- Evidências de build e emulador: `artifacts/qa/network-other-pc/20261023/` neste repositório (pasta de artefatos ignorada pelo Git). A ocorrência no segundo PC físico não foi reproduzida: seu endereço, firewall e mensagem original não estavam disponíveis. A inspeção deste Windows confirmou o serviço instalado ouvindo em TCP 43127 e regras permitindo seu executável; os bloqueios encontrados pertenciam a outra build local.
+- Semantica indisponível nesta sessão; decisões e limites foram registrados aqui, sem memória externa.
+
 ## Correção 0.6.5-kotlin — cadência do ponteiro, 19/10/2026
 
 - `testDebugUnitTest lintRelease assembleRelease assembleDebug`: sucesso; **156 testes passaram**, zero falhas. Lint release: zero erros e 28 avisos.

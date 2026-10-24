@@ -281,7 +281,7 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
 
   override fun render(state: UiState) {
     this.state = state
-    val paired = client.savedAddress() != null
+    val paired = state.computers.any { it.current }
     val waiting = pairingInProgress(state)
     val connected = state.status == "Conectado"
 
@@ -292,10 +292,10 @@ internal class ConnectionScreen(private val host: ScreenHost) : Screen {
     waitingStrip.visibility = if (showColors) View.VISIBLE else View.GONE
     waitingHint.visibility = waitingStrip.visibility
 
-    pairCard.visibility = if (!paired) View.VISIBLE else View.GONE
+    pairCard.visibility = if (!paired && !waiting) View.VISIBLE else View.GONE
     pairing.render(state)
 
-    pcCard.visibility = if (paired) View.VISIBLE else View.GONE
+    pcCard.visibility = if (paired && !waiting) View.VISIBLE else View.GONE
     if (paired) {
       pcName.text = state.pcName.ifBlank { "PC pareado" }
       val (tone, label) = statusTone(state.status)

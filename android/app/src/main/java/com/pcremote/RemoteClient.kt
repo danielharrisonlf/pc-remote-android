@@ -13,6 +13,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.wifi.WifiManager
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Build
@@ -30,6 +31,9 @@ import org.json.JSONObject
 import java.lang.ref.WeakReference
 import java.net.Inet4Address
 import java.net.InetAddress
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -40,6 +44,18 @@ import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
+
+internal fun connectionFailure(error: Throwable): String {
+  val causes = generateSequence(error) { it.cause }.take(8).toList()
+  return when {
+    causes.any { it is CertificateException || it is javax.net.ssl.SSLPeerUnverifiedException } -> "A identidade do PC não confere. Confira se é o mesmo PC pareado."
+    causes.any { it is javax.net.ssl.SSLException } -> "Falha na conexão segura com o PC. Atualize o app nos dois dispositivos e tente novamente."
+    causes.any { it is ConnectException } -> "O PC recusou a conexão. Abra o app no PC e confira o firewall da rede local."
+    causes.any { it is SocketTimeoutException } -> "O PC não respondeu a tempo. Confira se ambos estão na mesma rede Wi-Fi e se o firewall permite o app."
+    causes.any { it is NoRouteToHostException || it is UnknownHostException } -> "Rede indisponível para este PC. Confira a rede Wi-Fi dos dois dispositivos."
+    else -> "Não foi possível conectar ao PC. Confira a rede Wi-Fi e o firewall do PC."
+  }
+}
 
 class RemoteClient(context: Context) : RemoteController {
   private val app = context.applicationContext
@@ -120,19 +136,25 @@ class RemoteClient(context: Context) : RemoteController {
   },{ fail(it) })
   private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener { main.post { localClipboardChanged() } }
   private var discovery: NsdManager.DiscoveryListener? = null
+  private val resolver = DiscoveryResolver<NsdServiceInfo>()
+  private var multicastLock: WifiManager.MulticastLock? = null
   private var currentNetwork: Network? = null
   private val networkCallback = object : ConnectivityManager.NetworkCallback() {
     override fun onAvailable(network: Network) { main.post {
       val previous=currentNetwork
       currentNetwork=network
       if((foreground || keepAlive) && !requestedDisconnect) {
-        if(previous!=null && previous!=network && socket!=null) lost(generation)
+        if(previous!=null && previous!=network) {
+          stopDiscovery()
+          if(socket!=null) lost(generation)
+        }
         startDiscovery(); autoReconnect()
       }
     } }
     override fun onLost(network: Network) { main.post {
       if(currentNetwork!=network) return@post
       currentNetwork=null
+      stopDiscovery()
       if(!requestedDisconnect) lost(generation)
     } }
   }
@@ -193,7 +215,7 @@ class RemoteClient(context: Context) : RemoteController {
     close(false); forgetFiles()
     requestedDisconnect=false; endpoint=PairedComputer(host,port,fingerprint,UUID.randomUUID().toString(),deviceName())
     pairingHandshake=true
-    pairCode=code; patch { it.copy(status="Pareando",error="",snapshot=null,receivedText="",pairingFingerprint=fingerprint) }; open(false)
+    pairCode=code; patch { it.copy(status="Pareando",error="",pcName="",pcOs="",snapshot=null,receivedText="",pairingFingerprint=fingerprint) }; open(false)
   }
   /** Shown in the PC approval prompt, e.g. "Samsung SM-S918B"; the PC accepts up to 80 bytes. */
   private fun deviceName():String {
@@ -215,7 +237,7 @@ class RemoteClient(context: Context) : RemoteController {
   override fun disconnect() = run {
     close(true)
     if(pairingHandshake) restoreFailedPair()
-    patch { it.copy(status="Desconectado",snapshot=null,receivedText="",draggingVolume=null) }
+    patch { it.copy(status="Desconectado",error="",pcName=endpoint?.pcName.orEmpty(),pcOs=store.currentOs(),pairingFingerprint="",snapshot=null,receivedText="",draggingVolume=null) }
   }
   override fun forget() = run {
     try { store.clear() } catch (_:Exception) { fail("Não foi possível remover a credencial protegida. Tente novamente."); return@run }
@@ -241,10 +263,11 @@ class RemoteClient(context: Context) : RemoteController {
     pairingHandshake=false; previousPairEndpoint=null
   }
   private fun open(reconnecting:Boolean) {
-    val e=endpoint ?: return
+    val saved=endpoint ?: return
+    val e=if(pairingHandshake) saved else discoveredEndpoint(saved,view.discovered).also { endpoint=it }
     reconnectTask?.let(main::removeCallbacks); reconnectTask=null
     generation++; val own=generation; retireClipboard(); authenticated=false; clearDisarm(); inputIntent.clear(); dropInput(); rejectPending(); files.connectionEnded(); receiver.connectionEnded()
-    patch { it.copy(status=if(reconnecting) "Reconectando" else "Conectando",snapshot=null,inputSupported=false,numpadSupported=false,presentationSupported=false,deckSupported=false,filesSupported=false,filesTwoWay=false,searchSupported=false) }
+    patch { it.copy(status=if(pairingHandshake) "Pareando" else if(reconnecting) "Reconectando" else "Conectando",snapshot=null,inputSupported=false,numpadSupported=false,presentationSupported=false,deckSupported=false,filesSupported=false,filesTwoWay=false,searchSupported=false) }
     // Only a code pairing starts without a pinned identity; every other connection pins.
     val firstUse=e.fingerprint.isEmpty() && pairCode!=null
     if(e.fingerprint.isEmpty() && !firstUse) { fail("Pareie este PC de novo."); lost(own); return }
@@ -294,7 +317,7 @@ class RemoteClient(context: Context) : RemoteController {
         override fun onMessage(ws:WebSocket,bytes:ByteString) { ws.close(1003,null) }
         override fun onClosing(ws:WebSocket,code:Int,reason:String) { ws.close(code,null) }
         override fun onClosed(ws:WebSocket,code:Int,reason:String) { main.post { lost(own) } }
-        override fun onFailure(ws:WebSocket,t:Throwable,response:Response?) { main.post { if(own==generation) { if(!poweringOff()) fail(if(t is javax.net.ssl.SSLException) "A identidade do PC não confere." else "PC não encontrado na rede."); lost(own) } } }
+        override fun onFailure(ws:WebSocket,t:Throwable,response:Response?) { main.post { if(own==generation) { if(!poweringOff()) fail(connectionFailure(t)); lost(own) } } }
       })
     } catch (_:Exception) { fail("Não foi possível conectar ao PC."); lost(own) }
   }
@@ -311,11 +334,11 @@ class RemoteClient(context: Context) : RemoteController {
       is Incoming.Welcome -> {
         if(helloId!=msg.id || endpoint?.pcId!=msg.pcId || endpoint?.token.isNullOrBlank()) { ws.close(1002,null); return }
         if(msg.macs.isNotEmpty()) endpoint=endpoint?.copy(macs=msg.macs)
-        if(pairingHandshake && !store.canAdd(PcList.key(endpoint!!))) { close(true); restoreFailedPair(); patch { it.copy(status="Desconectado",error="Este celular já guarda ${PcList.MAX} PCs. Remova um em Conexão para adicionar outro.",snapshot=null) }; return }
+        if(pairingHandshake && !store.canAdd(PcList.key(endpoint!!))) { close(true); restoreFailedPair(); patch { it.copy(status="Desconectado",error="Este celular já guarda ${PcList.MAX} PCs. Remova um em Conexão para adicionar outro.",pcName=endpoint?.pcName.orEmpty(),pcOs=store.currentOs(),pairingFingerprint="",snapshot=null) }; return }
         if(pairingHandshake) try { store.persist(endpoint!!) } catch (_:Exception) {
           close(true)
           restoreFailedPair()
-          patch { it.copy(status="Desconectado",error="Não foi possível proteger e salvar o pareamento. Verifique o armazenamento do celular e tente novamente.",snapshot=null) }
+          patch { it.copy(status="Desconectado",error="Não foi possível proteger e salvar o pareamento. Verifique o armazenamento do celular e tente novamente.",pcName=endpoint?.pcName.orEmpty(),pcOs=store.currentOs(),pairingFingerprint="",snapshot=null) }
           return
         }
         val wasPairing=pairingHandshake
@@ -346,7 +369,7 @@ class RemoteClient(context: Context) : RemoteController {
         val message=when(msg.code) { "pairing_expired"->"Código incorreto ou expirado."; "pairing_denied"->"Pareamento recusado no PC."; "rate_limited"->"Muitas tentativas. Aguarde um pouco."; "unauthorized"->"Acesso revogado. Pareie de novo."; "unavailable"->"Outro celular já está conectado a este PC."; else->"Não foi possível conectar." }
         close(true)
         if(failedPairing) restoreFailedPair()
-        patch { it.copy(status="Desconectado",error=message) }
+        patch { it.copy(status="Desconectado",error=message,pcName=endpoint?.pcName.orEmpty(),pcOs=store.currentOs(),pairingFingerprint="") }
       } else if(authenticated) complete(msg.id,msg.message,msg.code)
       is Incoming.Ack -> if(authenticated) complete(msg.id,null,null) else ws.close(1002,null)
       is Incoming.State -> if(authenticated) onState(msg.snapshot) else ws.close(1002,null)
@@ -359,10 +382,10 @@ class RemoteClient(context: Context) : RemoteController {
     generation++
     retireClipboard()
     reconnectTask?.let(main::removeCallbacks); reconnectTask=null
-    if(pairingHandshake) restoreFailedPair()
+    if(pairingHandshake) { restoreFailedPair(); requestedDisconnect=true }
     pairCode=null; pairId=null
     helloId=null; authenticated=false; clearDisarm(); socket?.cancel(); socket=null; client?.dispatcher?.executorService?.shutdown(); client=null; inputIntent.clear(); dropInput(); rejectPending(); files.connectionEnded(); receiver.connectionEnded(); volumeTask?.let(main::removeCallbacks); volumeTask=null; finalVolumeTimeout?.let(main::removeCallbacks); finalVolumeTimeout=null; finalVolume=null
-    patch { it.copy(status="Desconectado",snapshot=null,inputSupported=false,numpadSupported=false,presentationSupported=false,deckSupported=false,filesSupported=false,filesTwoWay=false,searchSupported=false,draggingVolume=null) }
+    patch { it.copy(status="Desconectado",pcName=endpoint?.pcName.orEmpty(),pcOs=store.currentOs(),pairingFingerprint="",snapshot=null,inputSupported=false,numpadSupported=false,presentationSupported=false,deckSupported=false,filesSupported=false,filesTwoWay=false,searchSupported=false,draggingVolume=null) }
     if(requestedDisconnect || (!foreground && !keepAlive) || endpoint?.token.isNullOrBlank()) return
     val delay=intArrayOf(1,2,4,8,16,30)[attempt.coerceAtMost(5)]*1000L+SecureRandom().nextInt(500)
     val retired=generation
@@ -716,33 +739,59 @@ class RemoteClient(context: Context) : RemoteController {
       null
     } catch (_:Exception) { "O Android não permitiu copiar o texto." }
   }
+  private fun pumpDiscovery() {
+    val ticket=resolver.next() ?: return
+    try { nsd.resolveService(ticket.service,object:NsdManager.ResolveListener {
+      override fun onResolveFailed(info:NsdServiceInfo,errorCode:Int) { main.post { finishResolve(ticket,null,errorCode==NsdManager.FAILURE_ALREADY_ACTIVE) } }
+      override fun onServiceResolved(info:NsdServiceInfo) { main.post { finishResolve(ticket,info) } }
+    }) } catch (_:Exception) { finishResolve(ticket,null,true) }
+  }
+  private fun finishResolve(ticket:DiscoveryResolver.Ticket<NsdServiceInfo>,info:NsdServiceInfo?,busy:Boolean=false) {
+    val valid=resolver.isValid(ticket)
+    if(!resolver.complete(ticket)) return
+    if(info!=null && valid) {
+      val addresses=if(Build.VERSION.SDK_INT>=34) info.hostAddresses else listOfNotNull(info.host)
+      val host=addresses.filterIsInstance<Inet4Address>().firstOrNull()?.hostAddress
+      if(host!=null && addressValid(host,info.port)) {
+        val advertised=info.attributes["id"]?.toString(Charsets.UTF_8)
+        val item=DiscoveredComputer(info.serviceName,host,info.port,advertised.orEmpty())
+        patch { it.copy(discovered=(it.discovered.filterNot { d -> d.name==item.name }+item).takeLast(50)) }
+        val e=endpoint
+        if(e!=null && foreground && !requestedDisconnect && socket==null && e.token.isNotBlank() && e.pcId==advertised) {
+          endpoint=discoveredEndpoint(e,view.discovered)
+          open(true)
+        }
+      }
+    }
+    if(busy && valid && resolver.retryBusy(ticket)) main.postDelayed({ pumpDiscovery() },1500)
+    else pumpDiscovery()
+  }
   override fun startDiscovery() = run {
     if(discovery!=null) return@run
+    resolver.start()
     val listener=object:NsdManager.DiscoveryListener {
       override fun onDiscoveryStarted(serviceType:String) {}
       override fun onDiscoveryStopped(serviceType:String) {}
-      override fun onStartDiscoveryFailed(serviceType:String,errorCode:Int) { main.post { discovery=null; fail("Não foi possível procurar PCs na rede.") } }
+      override fun onStartDiscoveryFailed(serviceType:String,errorCode:Int) { main.post { if(discovery===this) { stopDiscovery(); fail("Não foi possível procurar PCs na rede.") } } }
       override fun onStopDiscoveryFailed(serviceType:String,errorCode:Int) {}
-      override fun onServiceLost(serviceInfo:NsdServiceInfo) { main.post { patch { v -> v.copy(discovered=v.discovered.filterNot { it.name==serviceInfo.serviceName }) } } }
-      override fun onServiceFound(serviceInfo:NsdServiceInfo) { try { nsd.resolveService(serviceInfo,object:NsdManager.ResolveListener {
-        override fun onResolveFailed(info:NsdServiceInfo,errorCode:Int) {}
-        override fun onServiceResolved(info:NsdServiceInfo) { main.post {
-          val host=(info.host as? Inet4Address)?.hostAddress ?: return@post
-          if(!addressValid(host,info.port)) return@post
-          val advertised=info.attributes["id"]?.toString(Charsets.UTF_8)
-          val item=DiscoveredComputer(info.serviceName,host,info.port,advertised.orEmpty())
-          patch { it.copy(discovered=(it.discovered.filterNot { d -> d.name==item.name }+item).takeLast(50)) }
-          val e=endpoint ?: return@post
-          if(foreground && !requestedDisconnect && socket==null && e.token.isNotBlank() && e.pcId==advertised) {
-            endpoint=e.copy(host=host,port=info.port); open(true)
-          }
-        } }
-      }) } catch (_:Exception) {} }
+      override fun onServiceLost(serviceInfo:NsdServiceInfo) { main.post { if(discovery!==this) return@post; resolver.lost(serviceInfo.serviceName); patch { v -> v.copy(discovered=v.discovered.filterNot { it.name==serviceInfo.serviceName }) } } }
+      override fun onServiceFound(serviceInfo:NsdServiceInfo) { main.post { if(discovery!==this) return@post; resolver.found(serviceInfo.serviceName,serviceInfo); pumpDiscovery() } }
     }
     discovery=listener
-    try { nsd.discoverServices("_pcremote._tcp.",NsdManager.PROTOCOL_DNS_SD,listener) } catch (_:Exception) { discovery=null }
+    try {
+      try {
+        val wifi=app.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        multicastLock=wifi?.createMulticastLock("pc-remote-discovery")?.apply { setReferenceCounted(false); acquire() }
+      } catch (_:Exception) { multicastLock=null }
+      nsd.discoverServices("_pcremote._tcp.",NsdManager.PROTOCOL_DNS_SD,listener)
+    } catch (_:Exception) { stopDiscovery(); fail("Não foi possível procurar PCs na rede.") }
   }
-  override fun stopDiscovery() = run { discovery?.let { try { nsd.stopServiceDiscovery(it) } catch (_:Exception) {} }; discovery=null; patch { it.copy(discovered=emptyList()) } }
+  override fun stopDiscovery() = run {
+    resolver.stop()
+    discovery?.let { try { nsd.stopServiceDiscovery(it) } catch (_:Exception) {} }; discovery=null
+    multicastLock?.let { try { if(it.isHeld) it.release() } catch (_:Exception) {} }; multicastLock=null
+    patch { it.copy(discovered=emptyList()) }
+  }
   private fun notifyClipboard() {
     try {
       if(Build.VERSION.SDK_INT>=33 && app.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) return
@@ -871,10 +920,10 @@ class RemoteClient(context: Context) : RemoteController {
     val current=store.restore()?.let(PcList::key)
     if(id==current && !pairingHandshake) { if(socket==null) reconnect(); return@run }
     if(pairingHandshake) { close(false); restoreFailedPair() }
-    try { store.select(id) } catch (_:Exception) { fail("Não foi possível trocar de PC. Tente novamente."); return@run }
+    try { store.select(id) } catch (_:Exception) { patch { it.copy(status="Desconectado",error="Não foi possível trocar de PC. Tente novamente.",pcName=endpoint?.pcName.orEmpty(),pcOs=store.currentOs(),pairingFingerprint="") }; return@run }
     // Like removing a PC: nothing queued, in flight or listed for one PC may reach another.
-    close(true); forgetFiles(); endpoint=target; attempt=0
-    patch { it.copy(status="Desconectado",pcName=target.pcName,pcOs=store.currentOs(),snapshot=null,receivedText="",computers=store.computers()) }
+    close(true); forgetFiles(); endpoint=discoveredEndpoint(target,view.discovered); attempt=0
+    patch { it.copy(status="Desconectado",error="",pcName=target.pcName,pcOs=store.currentOs(),pairingFingerprint="",snapshot=null,receivedText="",computers=store.computers()) }
     requestedDisconnect=false; autoReconnect()
   }
   override fun forgetComputer(id:String) = run {
