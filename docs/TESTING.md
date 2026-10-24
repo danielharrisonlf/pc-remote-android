@@ -9,6 +9,14 @@ Registro da alternativa 0.2.0-kotlin em 14/10/2026. Os resultados React Native d
 - APK release com R8: **771561 bytes**, SHA-256 `35fe317b8edf6936e2de47f6f7201bd3f14cc4ae641e2026b1de135e07f3d5e1`. Assinatura v2 conferida com `apksigner`: certificado SHA-256 `70c09aad2f64bd4a0ff345b63347b7c27c776bc0d52d8b23f9db5a04ac74aa32`.
 - Assets preparados em `release-assets/0.6.9/`: `pc-remote-android-kotlin-0.6.9-evaluation.apk` e `KOTLIN-SHA256SUMS-0.6.9.txt`.
 
+### Verificação adicional do fallback, 24/10/2026
+
+- `testDebugUnitTest assembleDebug assembleRelease lintDebug lintRelease` passou. A tarefa de testes estava `UP-TO-DATE`; por isso foi executado separadamente `testDebugUnitTest --rerun-tasks`, com **176 testes em 25 suítes**, zero falhas/erros/ignorados.
+- O APK release gerado manteve o SHA-256 publicado `35fe317b8edf6936e2de47f6f7201bd3f14cc4ae641e2026b1de135e07f3d5e1` e 771561 bytes. O APK debug 609 tem 3416336 bytes, SHA-256 `b077f0e8f288645e91442e87c97dbe72b2f56afe209c11cb1eb50bb9668ed0e5`.
+- Controle no emulador: o primeiro endereço `127.0.0.1` recusou a conexão na porta do fixture; o segundo, `10.0.2.2`, alcançou o servidor TLS Rust. O APK anterior 0.6.8 permaneceu desconectado, sem pedido ou credencial no servidor. A mensagem visual exata dessa tentativa não foi capturada e não é apresentada como prova.
+- O candidato 0.6.9 recebeu a mesma seleção com os dois endereços: chegou ao servidor Rust, criou um pedido e conectou depois da aprovação. Após `force-stop` e nova abertura, conectou novamente, confirmando a persistência do endereço vencedor. O APK release exato foi instalado sobre o debug e também reconectou com `Conectado` / `PC-QA-A` na hierarquia do Maestro.
+- Evidências locais em `../artifacts/qa/connection-fallback/20261024-172507/`. Os servidores usam `Core::ephemeral` e o manipulador TLS/WSS de produção. O teste verifica recusa e fallback em emulador; não comprova a conectividade do outro computador físico relatado pelo usuário nem repete ao vivo um certificado divergente.
+
 ## Correção 0.6.8-kotlin — pareamento e descoberta, 24/10/2026
 
 - `versionCode` 608, `versionName` `0.6.8-kotlin`. `testDebugUnitTest compileDebugKotlin`: sucesso; **171 testes em 24 suítes**, zero falhas/erros/ignorados. As regressões cobrem retries espaçados em 1/2/4 segundos, continuidade dos PCs prontos, recuperação no mesmo callback após perda temporária e invalidação por perda definitiva ou fim da busca.
