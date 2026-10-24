@@ -40,6 +40,7 @@ import java.security.SecureRandom
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
 import java.util.UUID
+import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
@@ -137,6 +138,12 @@ class RemoteClient(context: Context) : RemoteController {
   private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener { main.post { localClipboardChanged() } }
   private var discovery: NsdManager.DiscoveryListener? = null
   private val resolver = DiscoveryResolver<NsdServiceInfo>()
+  private val serviceInfoQueue = ServiceInfoQueue<NsdServiceInfo>()
+  private data class ServiceInfoRegistration(val ticket: ServiceInfoQueue.Ticket<NsdServiceInfo>, val callback: NsdManager.ServiceInfoCallback)
+  private val serviceInfoRegistrations = LinkedHashMap<String, ServiceInfoRegistration>()
+  private val serviceInfoExecutor = Executor { command -> main.post(command) }
+  private var legacyDiscoveryWake:Runnable? = null
+  private var serviceInfoWake:Runnable? = null
   private var multicastLock: WifiManager.MulticastLock? = null
   private var currentNetwork: Network? = null
   private val networkCallback = object : ConnectivityManager.NetworkCallback() {
@@ -366,7 +373,7 @@ class RemoteClient(context: Context) : RemoteController {
           endpoint=store.restore()
           patch { it.copy(pcName=endpoint?.pcName.orEmpty(),pcOs=store.currentOs(),computers=store.computers()) }
         }
-        val message=when(msg.code) { "pairing_expired"->"Código incorreto ou expirado."; "pairing_denied"->"Pareamento recusado no PC."; "rate_limited"->"Muitas tentativas. Aguarde um pouco."; "unauthorized"->"Acesso revogado. Pareie de novo."; "unavailable"->"Outro celular já está conectado a este PC."; else->"Não foi possível conectar." }
+        val message=pairingFailureMessage(msg.code)
         close(true)
         if(failedPairing) restoreFailedPair()
         patch { it.copy(status="Desconectado",error=message,pcName=endpoint?.pcName.orEmpty(),pcOs=store.currentOs(),pairingFingerprint="") }
@@ -740,42 +747,146 @@ class RemoteClient(context: Context) : RemoteController {
     } catch (_:Exception) { "O Android não permitiu copiar o texto." }
   }
   private fun pumpDiscovery() {
-    val ticket=resolver.next() ?: return
+    if(Build.VERSION.SDK_INT>=34) { pumpServiceInfoCallbacks(); return }
+    legacyDiscoveryWake?.let(main::removeCallbacks); legacyDiscoveryWake=null
+    val now=android.os.SystemClock.uptimeMillis()
+    val ticket=resolver.next(now)
+    if(ticket==null) {
+      if(!resolver.hasActiveResolve()) scheduleLegacyDiscoveryWake(now)
+      return
+    }
     try { nsd.resolveService(ticket.service,object:NsdManager.ResolveListener {
-      override fun onResolveFailed(info:NsdServiceInfo,errorCode:Int) { main.post { finishResolve(ticket,null,errorCode==NsdManager.FAILURE_ALREADY_ACTIVE) } }
+      override fun onResolveFailed(info:NsdServiceInfo,errorCode:Int) {
+        val retryable=errorCode==NsdManager.FAILURE_ALREADY_ACTIVE || errorCode==NsdManager.FAILURE_INTERNAL_ERROR || errorCode==NsdManager.FAILURE_MAX_LIMIT
+        main.post { finishResolve(ticket,null,retryable) }
+      }
       override fun onServiceResolved(info:NsdServiceInfo) { main.post { finishResolve(ticket,info) } }
     }) } catch (_:Exception) { finishResolve(ticket,null,true) }
   }
-  private fun finishResolve(ticket:DiscoveryResolver.Ticket<NsdServiceInfo>,info:NsdServiceInfo?,busy:Boolean=false) {
+  private fun finishResolve(ticket:DiscoveryResolver.Ticket<NsdServiceInfo>,info:NsdServiceInfo?,retryable:Boolean=false) {
     val valid=resolver.isValid(ticket)
     if(!resolver.complete(ticket)) return
-    if(info!=null && valid) {
-      val addresses=if(Build.VERSION.SDK_INT>=34) info.hostAddresses else listOfNotNull(info.host)
-      val host=addresses.filterIsInstance<Inet4Address>().firstOrNull()?.hostAddress
-      if(host!=null && addressValid(host,info.port)) {
-        val advertised=info.attributes["id"]?.toString(Charsets.UTF_8)
-        val item=DiscoveredComputer(info.serviceName,host,info.port,advertised.orEmpty())
-        patch { it.copy(discovered=(it.discovered.filterNot { d -> d.name==item.name }+item).takeLast(50)) }
-        val e=endpoint
-        if(e!=null && foreground && !requestedDisconnect && socket==null && e.token.isNotBlank() && e.pcId==advertised) {
-          endpoint=discoveredEndpoint(e,view.discovered)
-          open(true)
+    if(info!=null && valid) publishDiscovered(info,modern=false)
+    else if(info==null && valid && retryable) resolver.retryFailed(ticket,android.os.SystemClock.uptimeMillis())
+    // A failed service goes to the tail; pump now so waiting PCs receive the native slot first.
+    pumpDiscovery()
+  }
+  @android.annotation.TargetApi(34)
+  private fun pumpServiceInfoCallbacks() {
+    val scan=discovery ?: return
+    serviceInfoWake?.let(main::removeCallbacks); serviceInfoWake=null
+    val now=android.os.SystemClock.uptimeMillis()
+    while(true) {
+      val ticket=serviceInfoQueue.next(now) ?: break
+      lateinit var callback:NsdManager.ServiceInfoCallback
+      callback=object:NsdManager.ServiceInfoCallback {
+        override fun onServiceInfoCallbackRegistrationFailed(errorCode:Int) { main.post {
+          val registered=serviceInfoRegistrations[ticket.key]
+          if(discovery!==scan || registered?.callback!==this || !serviceInfoQueue.isValid(ticket)) return@post
+          serviceInfoRegistrations.remove(ticket.key)
+          try { nsd.unregisterServiceInfoCallback(this) } catch (_:Exception) {}
+          serviceInfoQueue.retryFailed(ticket,android.os.SystemClock.uptimeMillis())
+          pumpServiceInfoCallbacks()
+        } }
+        override fun onServiceUpdated(info:NsdServiceInfo) { main.post {
+          val registered=serviceInfoRegistrations[ticket.key]
+          if(discovery!==scan || registered?.callback!==this || !serviceInfoQueue.isValid(ticket)) return@post
+          publishDiscovered(info,modern=true)
+        } }
+        override fun onServiceLost() { main.post {
+          val registered=serviceInfoRegistrations[ticket.key]
+          if(discovery!==scan || registered?.callback!==this || !serviceInfoQueue.temporarilyLost(ticket)) return@post
+          // This watcher remains registered: Android may report the same service again
+          // through onServiceUpdated without another DiscoveryListener.onServiceFound.
+          removeDiscoveredService(ticket.service.serviceName)
+        } }
+        override fun onServiceInfoCallbackUnregistered() {}
+      }
+      serviceInfoRegistrations[ticket.key]=ServiceInfoRegistration(ticket,callback)
+      try { nsd.registerServiceInfoCallback(ticket.service,serviceInfoExecutor,callback) }
+      catch (_:Exception) {
+        val registered=serviceInfoRegistrations[ticket.key]
+        if(registered?.callback===callback) {
+          serviceInfoRegistrations.remove(ticket.key)
+          try { nsd.unregisterServiceInfoCallback(callback) } catch (_:Exception) {}
+          serviceInfoQueue.retryFailed(ticket,android.os.SystemClock.uptimeMillis())
         }
       }
     }
-    if(busy && valid && resolver.retryBusy(ticket)) main.postDelayed({ pumpDiscovery() },1500)
-    else pumpDiscovery()
+    scheduleServiceInfoWake(scan,android.os.SystemClock.uptimeMillis())
+  }
+  @android.annotation.TargetApi(34)
+  private fun scheduleServiceInfoWake(scan:NsdManager.DiscoveryListener,nowMillis:Long) {
+    val wakeAt=serviceInfoQueue.nextWakeAt(nowMillis) ?: return
+    val wake=Runnable {
+      if(discovery!==scan) return@Runnable
+      serviceInfoWake=null
+      pumpServiceInfoCallbacks()
+    }
+    serviceInfoWake?.let(main::removeCallbacks)
+    serviceInfoWake=wake
+    main.postDelayed(wake,(wakeAt-nowMillis).coerceAtLeast(0L))
+  }
+  private fun scheduleLegacyDiscoveryWake(nowMillis:Long) {
+    val scan=discovery ?: return
+    val wakeAt=resolver.nextWakeAt(nowMillis) ?: return
+    val wake=Runnable {
+      if(discovery!==scan) return@Runnable
+      legacyDiscoveryWake=null
+      pumpDiscovery()
+    }
+    legacyDiscoveryWake?.let(main::removeCallbacks)
+    legacyDiscoveryWake=wake
+    main.postDelayed(wake,(wakeAt-nowMillis).coerceAtLeast(0L))
+  }
+  private fun publishDiscovered(info:NsdServiceInfo,modern:Boolean) {
+    val addresses=if(modern && Build.VERSION.SDK_INT>=34) info.hostAddresses else listOfNotNull(info.host)
+    val host=addresses.filterIsInstance<Inet4Address>().firstOrNull()?.hostAddress
+    if(host==null || !addressValid(host,info.port)) { removeDiscoveredService(info.serviceName); return }
+    val advertised=info.attributes["id"]?.toString(Charsets.UTF_8).orEmpty()
+    val serviceName=info.serviceName
+    val item=DiscoveredComputer(serviceName,host,info.port,advertised,serviceName)
+    val discovered=(view.discovered.filterNot { old ->
+      if(advertised.isNotEmpty()) old.id==advertised || old.serviceName==serviceName || old.serviceName.isEmpty() && old.name==serviceName
+      else old.serviceName==serviceName || old.serviceName.isEmpty() && old.name==serviceName
+    }+item).takeLast(50)
+    patch { it.copy(discovered=discovered) }
+    val e=endpoint
+    if(e!=null && foreground && !requestedDisconnect && socket==null && e.token.isNotBlank() && e.pcId==advertised) {
+      endpoint=discoveredEndpoint(e,view.discovered)
+      open(true)
+    }
+  }
+  private fun removeDiscoveredService(serviceName:String) {
+    if(serviceName.isBlank()) return
+    val remaining=view.discovered.filterNot { it.serviceName==serviceName || it.serviceName.isEmpty() && it.name==serviceName }
+    if(remaining.size!=view.discovered.size) patch { it.copy(discovered=remaining) }
   }
   override fun startDiscovery() = run {
     if(discovery!=null) return@run
     resolver.start()
+    if(Build.VERSION.SDK_INT>=34) serviceInfoQueue.start()
     val listener=object:NsdManager.DiscoveryListener {
       override fun onDiscoveryStarted(serviceType:String) {}
       override fun onDiscoveryStopped(serviceType:String) {}
       override fun onStartDiscoveryFailed(serviceType:String,errorCode:Int) { main.post { if(discovery===this) { stopDiscovery(); fail("Não foi possível procurar PCs na rede.") } } }
       override fun onStopDiscoveryFailed(serviceType:String,errorCode:Int) {}
-      override fun onServiceLost(serviceInfo:NsdServiceInfo) { main.post { if(discovery!==this) return@post; resolver.lost(serviceInfo.serviceName); patch { v -> v.copy(discovered=v.discovered.filterNot { it.name==serviceInfo.serviceName }) } } }
-      override fun onServiceFound(serviceInfo:NsdServiceInfo) { main.post { if(discovery!==this) return@post; resolver.found(serviceInfo.serviceName,serviceInfo); pumpDiscovery() } }
+      override fun onServiceLost(serviceInfo:NsdServiceInfo) { main.post {
+        if(discovery!==this) return@post
+        if(Build.VERSION.SDK_INT>=34) {
+          serviceInfoQueue.lost(serviceInfo.serviceName)?.let { ticket ->
+            serviceInfoRegistrations.remove(ticket.key)?.let { try { nsd.unregisterServiceInfoCallback(it.callback) } catch (_:Exception) {} }
+          }
+          pumpServiceInfoCallbacks()
+        } else resolver.lost(serviceInfo.serviceName)
+        removeDiscoveredService(serviceInfo.serviceName)
+      } }
+      override fun onServiceFound(serviceInfo:NsdServiceInfo) { main.post {
+        if(discovery!==this) return@post
+        if(Build.VERSION.SDK_INT>=34) {
+          if(serviceInfoQueue.found(serviceInfo.serviceName,serviceInfo)) pumpServiceInfoCallbacks()
+        } else { resolver.found(serviceInfo.serviceName,serviceInfo); pumpDiscovery() }
+      } }
     }
     discovery=listener
     try {
@@ -787,7 +898,14 @@ class RemoteClient(context: Context) : RemoteController {
     } catch (_:Exception) { stopDiscovery(); fail("Não foi possível procurar PCs na rede.") }
   }
   override fun stopDiscovery() = run {
+    legacyDiscoveryWake?.let(main::removeCallbacks); legacyDiscoveryWake=null
+    serviceInfoWake?.let(main::removeCallbacks); serviceInfoWake=null
     resolver.stop()
+    serviceInfoQueue.stop()
+    if(Build.VERSION.SDK_INT>=34) {
+      serviceInfoRegistrations.values.toList().forEach { registration -> try { nsd.unregisterServiceInfoCallback(registration.callback) } catch (_:Exception) {} }
+    }
+    serviceInfoRegistrations.clear()
     discovery?.let { try { nsd.stopServiceDiscovery(it) } catch (_:Exception) {} }; discovery=null
     multicastLock?.let { try { if(it.isHeld) it.release() } catch (_:Exception) {} }; multicastLock=null
     patch { it.copy(discovered=emptyList()) }

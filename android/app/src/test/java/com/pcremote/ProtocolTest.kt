@@ -89,6 +89,15 @@ class ProtocolTest {
     assertNull(Protocol.parseFile("""{"v":1,"type":"error","id":"$id","code":"disk_full","message":"Falha","retryable":true}"""))
   }
 
+  @Test fun pairingErrorsHaveStrictAllowlistedCodes() {
+    for (code in listOf("pairing_code_incorrect","pairing_expired","pairing_timeout","pairing_denied","pairing_invalidated","pairing_failed")) {
+      val frame="""{"v":1,"type":"error","id":"$id","code":"$code","message":"Falha","retryable":false}"""
+      assertEquals(code,(Protocol.parse(frame) as Incoming.Error).code)
+    }
+    val unknown="""{"v":1,"type":"error","id":"$id","code":"pairing_code_expired","message":"Falha","retryable":false}"""
+    assertNull(Protocol.parse(unknown))
+  }
+
   @Test fun fileSocketMessagesAreStrict() {
     val accept="""{"v":1,"type":"file.accept","id":"$id","transferId":"$transfer"}"""
     assertEquals(FileMessage.Accept(id,transfer),Protocol.parseFile(accept))

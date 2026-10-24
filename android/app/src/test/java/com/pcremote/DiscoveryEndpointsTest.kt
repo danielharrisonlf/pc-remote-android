@@ -106,19 +106,108 @@ class DiscoveryEndpointsTest {
     assertEquals("second",next.service)
   }
 
-  @Test fun busyResolutionRetriesAreBounded() {
+  @Test fun failedResolutionRetriesAreBoundedAndRotateBehindOtherComputers() {
     val queue=DiscoveryResolver<String>()
     queue.start()
-    queue.found("pc","address")
-    repeat(5) {
-      val ticket=queue.next()!!
-      assertTrue(queue.complete(ticket))
-      assertTrue(queue.retryBusy(ticket))
-    }
-    val last=queue.next()!!
-    assertTrue(queue.complete(last))
-    assertFalse(queue.retryBusy(last))
-    assertNull(queue.next())
+    queue.found("failing","address")
+    queue.found("healthy","address 2")
+    val first=queue.next(0)!!
+    assertEquals("failing",first.name)
+    assertTrue(queue.complete(first))
+    assertTrue(queue.retryFailed(first,0))
+    val healthy=queue.next(0)!!
+    assertEquals("healthy",healthy.name)
+    assertTrue(queue.complete(healthy))
+    assertNull(queue.next(999))
+    assertEquals(1_000L,queue.nextWakeAt(0))
+    var retry=queue.next(1_000)!!
+    assertEquals(1,retry.retries)
+    assertTrue(queue.complete(retry))
+    assertTrue(queue.retryFailed(retry,1_000))
+    assertNull(queue.next(2_999))
+    assertEquals(3_000L,queue.nextWakeAt(2_999))
+    retry=queue.next(3_000)!!
+    assertEquals(2,retry.retries)
+    assertTrue(queue.complete(retry))
+    assertTrue(queue.retryFailed(retry,3_000))
+    assertNull(queue.next(6_999))
+    assertEquals(7_000L,queue.nextWakeAt(6_999))
+    retry=queue.next(7_000)!!
+    assertEquals(3,retry.retries)
+    assertTrue(queue.complete(retry))
+    assertFalse(queue.retryFailed(retry,7_000))
+    assertNull(queue.next(7_000))
+  }
+
+  @Test fun api34CallbackFailuresRetryBehindWaitingServicesAndAreFenced() {
+    val queue=ServiceInfoQueue<String>()
+    queue.start()
+    queue.found("same-name-id-a","first")
+    queue.found("same-name-id-b","second")
+    val first=queue.next(0)!!
+    assertEquals("same-name-id-a",first.key)
+    assertTrue(queue.retryFailed(first,0))
+    assertFalse(queue.isValid(first))
+    val second=queue.next(0)!!
+    assertEquals("same-name-id-b",second.key)
+    assertTrue(queue.isValid(second))
+    queue.found("third","third")
+    assertEquals("third",queue.next(0)!!.key)
+    assertNull(queue.next(999))
+    assertEquals(1_000L,queue.nextWakeAt(999))
+    val retry=queue.next(1_000)!!
+    assertEquals(first.key,retry.key)
+    assertEquals(1,retry.retries)
+    assertFalse(queue.isValid(first))
+    assertTrue(queue.isValid(retry))
+  }
+
+  @Test fun api34TemporaryLossKeepsWatcherWhileDefinitiveLossAndStopFenceIt() {
+    val queue=ServiceInfoQueue<String>()
+    queue.start()
+    queue.found("instance","old")
+    val old=queue.next(0)!!
+    assertTrue(queue.temporarilyLost(old))
+    assertTrue(queue.isValid(old)) // onServiceUpdated can restore this same registration
+    assertTrue(queue.lost(old)) // DiscoveryListener.onServiceLost retires it definitively
+    assertFalse(queue.isValid(old))
+    queue.found("instance","new")
+    val current=queue.next(0)!!
+    assertEquals("new",current.service)
+    assertFalse(queue.lost(old))
+    assertTrue(queue.isValid(current))
+    val retired=queue.stop()
+    assertEquals(listOf(current),retired)
+    queue.start()
+    assertFalse(queue.isValid(current))
+    queue.found("instance","after restart")
+    assertEquals("after restart",queue.next(0)!!.service)
+  }
+
+  @Test fun api34CallbackRetriesStopAfterThreeRetriesAndQueueStaysBounded() {
+    val queue=ServiceInfoQueue<String>(limit=2)
+    queue.start()
+    queue.found("one","one")
+    queue.found("two","two")
+    queue.found("three","three")
+    val first=queue.next(0)!!
+    assertEquals("two",first.key) // limit 2 evicts the oldest waiting service
+    assertTrue(queue.retryFailed(first,0))
+    val second=queue.next(0)!!
+    assertEquals("three",second.key)
+    val retry=queue.next(1_000)!!
+    assertEquals("two",retry.key)
+    assertEquals(1,retry.retries)
+    assertTrue(queue.retryFailed(retry,1_000))
+    assertNull(queue.next(2_999))
+    val retry2=queue.next(3_000)!!
+    assertEquals(2,retry2.retries)
+    assertTrue(queue.retryFailed(retry2,3_000))
+    assertNull(queue.next(6_999))
+    val retry3=queue.next(7_000)!!
+    assertEquals(3,retry3.retries)
+    assertFalse(queue.retryFailed(retry3,7_000))
+    assertNull(queue.next(7_000))
   }
 
   @Test fun queueIsBoundedAndLostServicesAreRemoved() {
@@ -134,5 +223,11 @@ class DiscoveryEndpointsTest {
     assertTrue(connectionFailure(ConnectException()).contains("recusou"))
     assertTrue(connectionFailure(SSLHandshakeException("hidden").apply { initCause(CertificateException("fingerprint")) }).contains("identidade"))
     assertFalse(connectionFailure(ConnectException("private address" )).contains("private address"))
+  }
+
+  @Test fun wrongPairingCodeAndExpiredCodeHaveDifferentMessages() {
+    assertTrue(pairingFailureMessage("pairing_code_incorrect").contains("incorreto"))
+    assertTrue(pairingFailureMessage("pairing_expired").contains("expirou"))
+    assertFalse(pairingFailureMessage("pairing_code_incorrect") == pairingFailureMessage("pairing_expired"))
   }
 }

@@ -53,7 +53,7 @@ internal object Protocol {
   private val tokenPattern = Regex("[a-fA-F0-9]{64}")
   private val lowerHex = Regex("[a-f0-9]{64}")
   val macPattern = Regex("([0-9a-f]{2}:){5}[0-9a-f]{2}")
-  private val errorCodes = setOf("invalid_message", "version_mismatch", "unauthorized", "pairing_expired", "pairing_denied", "rate_limited", "unavailable", "conflict", "sensitive", "too_large", "clipboard_busy", "internal", "file_type", "file_busy", "file_integrity", "storage")
+  private val errorCodes = setOf("invalid_message", "version_mismatch", "unauthorized", "pairing_code_incorrect", "pairing_expired", "pairing_timeout", "pairing_denied", "pairing_invalidated", "pairing_failed", "rate_limited", "unavailable", "conflict", "sensitive", "too_large", "clipboard_busy", "internal", "file_type", "file_busy", "file_integrity", "storage")
   private val capabilities = setOf("audio", "media", "clipboard.text", "input.control", "input.numpad", "presentation.control", "deck.control", "wol.target", "file.transfer", "file.receive", "search.youtube", "power.control", "clipboard.image")
   val powerActions = setOf("lock", "sleep", "shutdown", "restart")
   /** power.v1: up to 24 h; lock only now. */

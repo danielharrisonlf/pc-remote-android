@@ -47,13 +47,20 @@ internal class PairingPanel(private val host: ScreenHost, private val onRequeste
     letterSpacing = 0.15f
     gravity = Gravity.CENTER
     typeface = Typeface.MONOSPACE
-    addTextChangedListener(SimpleWatcher { updateButton() })
+    addTextChangedListener(SimpleWatcher { error = null; updateButton() })
   }
   private val searching = ui.row(10).apply {
     addView(ProgressBar(ui.context).apply { indeterminateTintList = ColorStateList.valueOf(p.textTertiary) }, LinearLayout.LayoutParams(ui.dp(18), ui.dp(18)))
     addView(ui.text("Procurando PCs nesta rede…", TextStyle.CAPTION, p.textSecondary))
   }
   private val choices = RadioGroup(ui.context)
+  private val discoveryActions = ui.row(8).apply {
+    addView(ui.button("Atualizar busca", ButtonStyle.OUTLINED, R.drawable.ic_refresh_cw) {
+      host.client.stopDiscovery()
+      host.client.startDiscovery()
+    }, ui.weighted())
+    addView(ui.button("Informar endereço", ButtonStyle.OUTLINED) { manualAddress() }, ui.weighted())
+  }
   private val pair = ui.button("Parear", ButtonStyle.FILLED, R.drawable.ic_link, large = true) {
     val pc = chosen() ?: return@button
     host.client.pairWithCode(pc, code.text.toString())
@@ -64,16 +71,59 @@ internal class PairingPanel(private val host: ScreenHost, private val onRequeste
     addView(ui.text("No PC, clique em Parear celular e digite aqui o código.", TextStyle.BODY, p.textSecondary))
     addView(code, ui.matchWrap())
     addView(searching)
+    addView(ui.text("Se o computador não aparecer, atualize a busca ou informe o endereço dele.", TextStyle.CAPTION, p.textSecondary))
+    addView(discoveryActions, ui.matchWrap())
     addView(choices, ui.matchWrap())
     addView(pair, ui.matchWrap())
     addView(ui.button("Ler QR Code", ButtonStyle.OUTLINED, R.drawable.ic_scan_qr_code) { host.scanQr() }, ui.matchWrap())
   }
 
-  private fun key(pc: DiscoveredComputer) = pc.id.ifEmpty { "${pc.host}:${pc.port}" }
+  private fun key(pc: DiscoveredComputer) = pc.id.ifEmpty { pc.serviceName.ifEmpty { "${pc.host}:${pc.port}" } }
   private fun chosen() = state.discovered.firstOrNull { key(it) == selected }
 
+  private fun manualAddress() {
+    val address = ui.field("Nome ou endereço do PC").apply {
+      inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+      setSingleLine(true)
+    }
+    val port = ui.field("Porta").apply {
+      inputType = InputType.TYPE_CLASS_NUMBER
+      setSingleLine(true)
+      setText("43127")
+    }
+    val form = ui.column(10).apply {
+      setPadding(ui.dp(4), ui.dp(8), ui.dp(4), 0)
+      addView(address, ui.matchWrap())
+      addView(port, ui.matchWrap())
+      addView(ui.text("Use o código de 8 dígitos exibido no PC.", TextStyle.CAPTION, p.textSecondary))
+    }
+    val dialog = AlertDialog.Builder(host.activity, dialogTheme(p))
+      .setTitle("Informar endereço")
+      .setView(form)
+      .setNegativeButton("Cancelar", null)
+      .setPositiveButton("Parear", null)
+      .create()
+    dialog.setOnShowListener {
+      dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+        val target = address.text.toString().trim()
+        val portNumber = port.text.toString().toIntOrNull()
+        when {
+          !target.matches(Regex("[a-zA-Z0-9.-]{1,253}")) || target.contains("..") -> address.error = "Informe um nome ou endereço válido."
+          portNumber == null || portNumber !in 1..65535 -> port.error = "Informe uma porta entre 1 e 65535."
+          !code.text.toString().matches(Regex("[0-9]{8}")) -> code.error = "Digite os 8 dígitos exibidos no PC."
+          else -> {
+            host.client.pairWithCode(DiscoveredComputer("PC em $target", target, portNumber!!), code.text.toString())
+            dialog.dismiss()
+            onRequested()
+          }
+        }
+      }
+    }
+    dialog.show()
+  }
+
   private fun updateButton() {
-    pair.isEnabled = code.text.count(Char::isDigit) == 8 && chosen() != null && !pairingInProgress(state)
+    pair.isEnabled = code.text.toString().matches(Regex("[0-9]{8}")) && chosen() != null && !pairingInProgress(state)
   }
 
   fun render(state: UiState) {
@@ -81,14 +131,14 @@ internal class PairingPanel(private val host: ScreenHost, private val onRequeste
     val pcs = state.discovered
     if (pcs != rendered) {
       rendered = pcs
-      if (pcs.none { key(it) == selected }) selected = pcs.singleOrNull()?.let(::key)
+      if (pcs.isNotEmpty() && pcs.none { key(it) == selected }) selected = pcs.singleOrNull()?.let(::key)
       choices.setOnCheckedChangeListener(null)
       choices.removeAllViews()
       pcs.forEach { pc ->
         choices.addView(RadioButton(ui.context).apply {
           id = View.generateViewId()
           tag = key(pc)
-          text = pc.name
+          text = "${pc.name}\n${pc.host}"
           setTextColor(p.text)
           setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
           minHeight = ui.dp(52)

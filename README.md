@@ -1,21 +1,21 @@
 # PC Remote Android
 
-Versão **0.6.7-kotlin**. Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao desktop Rust/Tauri pela LAN, com protocolo 1 e as extensões `input.v1`, `files.v1`, `files.v2`, `search.v1`, `info.v1`, `power.v1`, `clipboard.v2`, `wol.v1`, `numpad.v1`, `presentation.v1` e `deck.v1`.
+Versão **0.6.8-kotlin**. Kotlin e Views do Android, sem React Native, Hermes, JavaScript, Compose ou WebView. Conecta ao desktop Rust/Tauri pela LAN, com protocolo 1 e as extensões `input.v1`, `files.v1`, `files.v2`, `search.v1`, `info.v1`, `power.v1`, `clipboard.v2`, `wol.v1`, `numpad.v1`, `presentation.v1` e `deck.v1`.
 
 ## Baixar e instalar
 
 | Aplicativo | Download |
 |---|---|
-| Android — APK universal, Android 7/API24+ | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.7-kotlin/pc-remote-android-kotlin-0.6.7-evaluation.apk) |
-| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.5/pc-remote-desktop-0.6.5-x64-setup.exe) |
+| Android — APK universal, Android 7/API24+ | [Baixar APK](https://github.com/danielharrisonlf/pc-remote-android/releases/download/v0.6.8-kotlin/pc-remote-android-kotlin-0.6.8-evaluation.apk) |
+| Windows x64 — instalador | [Baixar instalador .exe](https://github.com/danielharrisonlf/pc-remote-desktop/releases/download/v0.6.6/pc-remote-desktop-0.6.6-x64-setup.exe) |
 
-As releases dos dois repositórios são públicas. Veja a [release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.7-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.5). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
+As releases dos dois repositórios são públicas. Veja a [release Android](https://github.com/danielharrisonlf/pc-remote-android/releases/tag/v0.6.8-kotlin) e a [release Windows](https://github.com/danielharrisonlf/pc-remote-desktop/releases/tag/v0.6.6). APK assinado com chave debug de avaliação; instalador Windows sem Authenticode. Validação em celular físico permanece pendente.
 
 Instale o `.exe` no PC e abra o APK pelo gerenciador de arquivos do celular, autorizando a fonte quando solicitado. O app aparece como **PC Remote**, pacote `com.pcremote.nativeandroid`. Somente um controlador pode ficar conectado por PC. O uso não requer root, ADB, acessibilidade ou teclado especial.
 
 ## Tamanho
 
-**APK 0.6.7: 762593 bytes (0.763 MB), cerca de 96.2% menor que os 20.20 MB do antigo app React Native.** A medição sem R8 da 0.6.3 foi de 2.605 MB.
+**APK 0.6.8: 767209 bytes (0.767 MB), cerca de 96.2% menor que os 20.20 MB do antigo app React Native.** A medição sem R8 da 0.6.3 foi de 2.605 MB.
 
 Veja [SIZE.md](docs/SIZE.md) para bytes exatos, hashes e comparação das builds com e sem R8. O tamanho do download difere do espaço instalado e do consumo de RAM. O scanner QR opcional pode baixar módulos externos do Google Play Services, que não fazem parte do APK.
 
@@ -47,6 +47,8 @@ Cinco abas: **Touchpad**, **Controles**, **Mídia**, **Transferir** e **Conexão
 
 ## Atualizações
 
+Correção **0.6.8-kotlin**: distingue código incorreto, expirado e pedido recusado; recupera falhas temporárias na descoberta e permite informar o endereço quando um PC não aparece. Use também o desktop 0.6.6 para preservar o prazo dos pedidos já recebidos. Veja as [notas da release](docs/releases/0.6.8-kotlin.md).
+
 Correção **0.6.7-kotlin**: usa o IP atualizado ao trocar de PC, melhora a descoberta de computadores e mantém a tela de pareamento e o botão Cancelar durante a conexão. As falhas de rede agora mostram orientações específicas. Veja as [notas da release](docs/releases/0.6.7-kotlin.md).
 
 Correção **0.6.5-kotlin**: melhora a fluidez do ponteiro em conexões com maior tempo de resposta, preserva o último movimento ao levantar o dedo e mantém cliques na ordem dos movimentos. A fila de movimentos continua limitada e descarta movimento local antigo durante congestionamento. Veja a [validação](docs/TESTING.md) e as [notas da release](docs/releases/0.6.5-kotlin.md).
@@ -72,7 +74,7 @@ A partir da 0.5.0 a atualização acontece dentro do app:
 
 ## Pareamento e uso
 
-No PC, abra **Parear celular**. No Android, digite o código de 8 dígitos e escolha o PC encontrado na rede, ou leia o QR. Aprove o pedido no Windows. Com o QR, o celular já conhece a identidade SHA-256 do PC. Com o código, ele fixa o certificado da primeira conexão e mostra a faixa de cores da identidade, que deve ser igual à exibida no PC. WSS usa o certificado fixado, validação normal do hostname e credenciais individuais cifradas pelo Android Keystore.
+No PC, abra **Parear celular**. No Android, digite o código de 8 dígitos e escolha o PC pelo nome e endereço, ou leia o QR. Se faltar um PC, use **Atualizar busca** ou **Informar endereço**, com a porta exibida no desktop. Aprove o pedido no Windows. Com o QR, o celular já conhece a identidade SHA-256 do PC. Com o código, ele fixa o certificado da primeira conexão e mostra a faixa de cores da identidade, que deve ser igual à exibida no PC. WSS usa o certificado fixado, validação normal do hostname e credenciais individuais cifradas pelo Android Keystore.
 
 Volume e mudo refletem o Windows; o slider limita a frequência e confirma o valor final. Nas abas Touchpad e Mídia, com o PC conectado, os botões de volume do celular mudam o volume do PC de 5 em 5% (no Touchpad aparece "Volume do PC: NN%"); nas outras abas, ou desconectado, controlam o celular. Mídia segue o player que o Windows trata como atual; toque em outro player para escolhê-lo. Reproduzir/pausar, faixa anterior/próxima e posição **−10s/+10s** têm capacidades distintas; ações indisponíveis ficam desabilitadas, com explicação. Veja [compatibilidade de mídia](docs/MEDIA-COMPATIBILITY.md); não se promete controle de todo player.
 

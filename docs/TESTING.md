@@ -2,6 +2,21 @@
 
 Registro da alternativa 0.2.0-kotlin em 14/10/2026. Os resultados React Native da branch main não são apresentados como testes desta implementação. Integrações reais: Android SDK/Keystore/OkHttp e Windows Rust/Core Audio/GSMTC/clipboard/SendInput. Não há simulações no produto.
 
+## Correção 0.6.8-kotlin — pareamento e descoberta, 24/10/2026
+
+- `versionCode` 608, `versionName` `0.6.8-kotlin`. `testDebugUnitTest compileDebugKotlin`: sucesso; **171 testes em 24 suítes**, zero falhas/erros/ignorados. As regressões cobrem retries espaçados em 1/2/4 segundos, continuidade dos PCs prontos, recuperação no mesmo callback após perda temporária e invalidação por perda definitiva ou fim da busca.
+- `assembleDebug assembleRelease lintDebug lintRelease`: sucesso após corrigir a chamada API 34 em `stopDiscovery`. Lint final: zero erros, 31 avisos em debug e 32 em release. As tentativas iniciais com erro `NewApi` foram preservadas nas evidências.
+- APK release com R8: **767209 bytes**, SHA-256 `e67424b6778ad22932c019a646169ba0c8b64d32b4462041770ae6a2c5e2fd8d`. Assinatura v2 conferida: certificado de avaliação SHA-256 `70c09aad2f64bd4a0ff345b63347b7c27c776bc0d52d8b23f9db5a04ac74aa32`, igual ao publicado anteriormente.
+- Revisão independente sem defeitos materiais. No Android 14+, a documentação de [ServiceInfoCallback](https://developer.android.com/reference/android/net/nsd/NsdManager.ServiceInfoCallback) confirma que o mesmo observador pode receber atualização depois de `onServiceLost`; ele permanece ativo até perda definitiva ou encerramento da busca. Versões anteriores mantêm uma resolução nativa por vez, inclusive entre buscas.
+- Android 16/API 36, AVD Ritual_Pixel somente leitura: cliente real `pairWithCode` conectado a dois servidores Rust com o manipulador TLS/WSS de produção e identidades/certificados distintos. A pareou, reconectou após fechar/abrir; B pareou sem apagar A; seletor mostrou ambos e trocar de B para A conectou o PC escolhido.
+- Código de B enviado a A foi recusado como código incorreto sem novo pedido/credencial e preservou os PCs salvos. Captura inicial tardia foi marcada sem prova do aviso; repetição registrada com hierarchy e captura ao receber o erro.
+- Pedido enviado com código válido e aprovado após o vencimento do convite: passou no cliente Android do emulador. O fixture expirou o convite antes da aprovação, mantendo o pedido nos seus próprios 120 s; o PC concluiu e o celular conectou. O vencimento foi controlado pelo fixture, sem espera de dois minutos no relógio.
+- APK release exato instalado com `adb install -r` sobre o debug, mantendo os dados: reconectou B, mostrou A e B no seletor, conectou A e voltou a B. A primeira instalação foi preservada; `DebugInviteReceiver` está ausente no manifesto release e presente apenas no debug.
+- O Windows resolveu os dois serviços mDNS do fixture. A descoberta multicast no Android, dois PCs físicos em Wi-Fi, roteadores com isolamento e mudança real de rede continuam sem validação. O emulador acessa os servidores por `10.0.2.2`; isso não comprova alcance em Wi-Fi físico.
+- Recusa, expiração do próprio pedido e certificado divergente não foram repetidos no emulador nesta rodada; prazo e recusa têm regressões Rust, e seleção de endereço com certificado preservado tem regressões JVM. Android 7–13 não foi executado nesta rodada; lint verifica proteção das chamadas recentes.
+
+Evidências fora dos repositórios em `../artifacts/qa/pairing-discovery/20261024/`. O fixture Rust está no repositório desktop em `src-tauri/src/pairing_fixture.rs`; mouse/teclado, clipboard automático e autostart ficaram bloqueados. Semantica indisponível; o registro desta rodada fica nos arquivos e evidências locais.
+
 ## Release 0.6.7-kotlin — validação para publicação, 24/10/2026
 
 - `versionCode` 607 e `versionName` `0.6.7-kotlin`, pacote `com.pcremote.nativeandroid`. A assinatura v2 foi conferida contra o APK 0.6.6 baixado da release publicada: mesmo certificado SHA-256 `70c09aad2f64bd4a0ff345b63347b7c27c776bc0d52d8b23f9db5a04ac74aa32`.

@@ -2,7 +2,7 @@
 
 | Componente | Versão usada |
 |---|---|
-| Android / desktop | 0.6.7-kotlin (versionCode 607) / 0.6.5 |
+| Android / desktop | 0.6.8-kotlin (versionCode 608) / 0.6.6 |
 | Protocolo | 1 + extensões opcionais input.v1, files.v1, files.v2, search.v1, info.v1, power.v1, clipboard.v2, wol.v1, numpad.v1, presentation.v1 e deck.v1 |
 | Android Gradle Plugin | 9.2.1 |
 | Kotlin integrado ao AGP | 2.2.10, confirmado por buildEnvironment |
@@ -20,6 +20,7 @@ Versões diretas são exatas no Gradle. O projeto não utiliza package-lock, Her
 
 | Android | Desktop | Compatibilidade |
 |---|---|---|
+| 0.6.8-kotlin | 0.6.6 | Protocolo 1; distingue erros de código, preserva o prazo do pedido aceito e recupera descoberta temporariamente indisponível |
 | 0.6.7-kotlin | 0.6.5 | Mesmo protocolo e extensões da 0.6.6; corrige seleção do IP ao trocar de PC, descoberta de vários PCs e estado de pareamento |
 | 0.6.6-kotlin | 0.6.5 | Protocolo 1 + todas as extensões; nova identidade visual clean moderna (Precision Dual Prism em porcelana clara), ícone adaptativo e drawables atualizados |
 | 0.6.2–0.6.5-kotlin | 0.6.3–0.6.4 | Protocolo 1 + input.v1, files.v1, files.v2, search.v1, info.v1, power.v1, clipboard.v2, wol.v1, numpad.v1, presentation.v1 e deck.v1: tudo da 0.6.1, mais Wake-on-LAN (descoberta de MAC e envio de magic packet UDP), aba dedicada Controles (Deck de 12 atalhos, teclado numérico 123 e apresentador de slides com temporizador e botões de volume físico), Touchpad restaurado em tela cheia e pipeline de mouse com cadência de envio de 16 ms; a 0.6.5 adapta a janela ao RTT |
