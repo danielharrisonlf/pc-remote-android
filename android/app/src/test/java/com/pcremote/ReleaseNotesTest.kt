@@ -20,6 +20,10 @@ class ReleaseNotesTest {
     )
   }
 
+  @Test fun numberTooLongForAnIntBecomesAnUnnumberedItem() {
+    assertEquals(listOf(Block.Item("Correções", null)), ReleaseNotes.parse("20261026123. Correções"))
+  }
+
   @Test fun emptyNotesHaveNoBlocks() {
     assertEquals(emptyList<Block>(), ReleaseNotes.parse("\n\n"))
   }

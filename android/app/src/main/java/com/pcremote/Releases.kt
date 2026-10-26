@@ -94,26 +94,32 @@ internal object Releases {
   fun isNewer(release: Release, installed: AppVersion?) = installed != null && release.version > installed
 }
 
-/** One GitHub request at a time; callbacks run on OkHttp's thread. */
+/**
+ * One GitHub request at a time; callbacks run on OkHttp's thread. A caller that
+ * arrives while one runs (an Activity recreated by rotation) waits for the same
+ * answer instead of being dropped and left "checking" forever.
+ */
 internal class ReleaseChecker(private val http: OkHttpClient = OkHttpClient.Builder().callTimeout(15, TimeUnit.SECONDS).build()) {
+  private val lock = Any()
   private var inFlight: Call? = null
+  private val waiters = mutableListOf<(ReleaseLookup) -> Unit>()
 
   fun check(origin: UpdateOrigin, completion: (ReleaseLookup) -> Unit) {
-    if (inFlight != null) return
-    val request = Request.Builder()
-      .url(origin.releasesUrl)
-      .header("Accept", "application/vnd.github+json")
-      .build()
-    val call = http.newCall(request)
-    inFlight = call
+    val call = synchronized(lock) {
+      waiters += completion
+      if (inFlight != null) return
+      val request = Request.Builder()
+        .url(origin.releasesUrl)
+        .header("Accept", "application/vnd.github+json")
+        .build()
+      http.newCall(request).also { inFlight = it }
+    }
     call.enqueue(object : Callback {
       override fun onFailure(call: Call, e: IOException) {
-        inFlight = null
-        completion(ReleaseLookup.Unavailable("Sem conexão com o GitHub."))
+        finish(ReleaseLookup.Unavailable("Sem conexão com o GitHub."))
       }
 
       override fun onResponse(call: Call, response: Response) {
-        inFlight = null
         val result = response.use {
           when {
             it.code == 403 || it.code == 429 -> ReleaseLookup.Unavailable("GitHub indisponível no momento. Tente mais tarde.")
@@ -126,9 +132,17 @@ internal class ReleaseChecker(private val http: OkHttpClient = OkHttpClient.Buil
             }
           }
         }
-        completion(result)
+        finish(result)
       }
     })
+  }
+
+  private fun finish(result: ReleaseLookup) {
+    val pending = synchronized(lock) {
+      inFlight = null
+      waiters.toList().also { waiters.clear() }
+    }
+    pending.forEach { it(result) }
   }
 
 }

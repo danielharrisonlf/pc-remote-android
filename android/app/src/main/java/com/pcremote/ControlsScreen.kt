@@ -2,6 +2,7 @@ package com.pcremote
 
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
@@ -30,19 +31,21 @@ internal class ControlsScreen(private val host: ScreenHost) : Screen {
   private var activating = false
 
   private val handler = Handler(Looper.getMainLooper())
-  private var timerRunning = false
-  private var elapsedSeconds = 0
+  private val timerRunning get() = PresenterTimer.running
+  private val elapsedSeconds get() = PresenterTimer.elapsedSeconds()
+  private var lastBuzz = elapsedSeconds / 300
   private lateinit var timerLabel: TextView
   private lateinit var timerToggleBtn: PillButton
 
   private val ticker = object : Runnable {
     override fun run() {
       if (!timerRunning) return
-      elapsedSeconds++
       updateTimerUi()
-      if (elapsedSeconds > 0 && elapsedSeconds % 300 == 0) {
+      val mark = elapsedSeconds / 300
+      if (mark > lastBuzz) {
         timerLabel.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
       }
+      lastBuzz = mark
       handler.postDelayed(this, 1000L)
     }
   }
@@ -311,17 +314,20 @@ internal class ControlsScreen(private val host: ScreenHost) : Screen {
       ButtonStyle.TONAL,
       if (timerRunning) R.drawable.ic_pause else R.drawable.ic_play,
     ) {
-      timerRunning = !timerRunning
+      PresenterTimer.toggle()
       handler.removeCallbacks(ticker)
       if (timerRunning) handler.postDelayed(ticker, 1000L)
       updateTimerUi()
     }
     val resetBtn = ui.iconButton(R.drawable.ic_rotate_ccw, "Zerar cronômetro", 44) {
-      timerRunning = false
-      elapsedSeconds = 0
+      PresenterTimer.reset()
+      lastBuzz = 0
       handler.removeCallbacks(ticker)
       updateTimerUi()
     }
+    // A timer started before the Activity was recreated keeps ticking here.
+    handler.removeCallbacks(ticker)
+    if (timerRunning) handler.postDelayed(ticker, 1000L)
 
     addView(ui.row(12).apply {
       background = ui.rounded(p.surfaceSunken, 16f, p.border)
@@ -392,4 +398,31 @@ internal class ControlsScreen(private val host: ScreenHost) : Screen {
   }
 
   private fun formatTime(seconds: Int): String = "%02d:%02d".format(seconds / 60, seconds % 60)
+
+  /** The Activity is gone; the ticker must not keep it alive. The timer itself keeps counting. */
+  override fun destroy() {
+    handler.removeCallbacks(ticker)
+  }
+}
+
+/** Counts on the monotonic clock and outlives the Activity, so rotating the phone mid-talk keeps the time. */
+private object PresenterTimer {
+  var running = false
+    private set
+  private var startedAt = 0L
+  private var accumulatedMs = 0L
+
+  fun elapsedSeconds(): Int =
+    ((accumulatedMs + if (running) SystemClock.elapsedRealtime() - startedAt else 0L) / 1000L).toInt()
+
+  fun toggle() {
+    val now = SystemClock.elapsedRealtime()
+    if (running) accumulatedMs += now - startedAt else startedAt = now
+    running = !running
+  }
+
+  fun reset() {
+    running = false
+    accumulatedMs = 0L
+  }
 }

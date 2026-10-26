@@ -32,7 +32,7 @@ internal object ReleaseNotes {
         Regex("^[-*+]\\s+.*").matches(line) -> { flush(); blocks += Block.Item(line.substring(1).trim(), null) }
         Regex("^\\d+[.)]\\s+.*").matches(line) -> {
           flush()
-          val number = line.takeWhile(Char::isDigit).toInt()
+          val number = line.takeWhile(Char::isDigit).toIntOrNull()
           blocks += Block.Item(line.dropWhile(Char::isDigit).drop(1).trim(), number)
         }
         raw.startsWith("  ") && blocks.lastOrNull() is Block.Item && paragraph.isEmpty() -> {

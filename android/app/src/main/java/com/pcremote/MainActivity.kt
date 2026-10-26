@@ -173,6 +173,7 @@ internal class MainActivity : Activity(), ScreenHost {
 
   override fun onDestroy() {
     mainHandler.removeCallbacksAndMessages(null)
+    if (::screens.isInitialized) screens.values.forEach { it.destroy() }
     unregisterBack?.invoke()
     unregisterBack = null
     qrScanner.detach()

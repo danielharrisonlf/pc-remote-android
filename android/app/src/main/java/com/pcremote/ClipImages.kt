@@ -1,5 +1,6 @@
 package com.pcremote
 
+import android.content.ContentResolver
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -111,6 +112,8 @@ internal class ClipImageFiles(private val app: Context) {
 
   /** Worker thread: PNG and JPEG are copied as they are, other formats become PNG. */
   fun prepare(uri: Uri): Prepared {
+    // A file:// clip from another app would be read with this app's own access to its private files.
+    if (uri.scheme != ContentResolver.SCHEME_CONTENT) return Prepared.Refused("Não foi possível ler a imagem copiada.")
     val resolver = app.contentResolver
     return try {
       val head = ByteArray(16)
