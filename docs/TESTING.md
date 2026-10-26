@@ -2,6 +2,17 @@
 
 Registro da alternativa 0.2.0-kotlin em 14/10/2026. Os resultados React Native da branch main não são apresentados como testes desta implementação. Integrações reais: Android SDK/Keystore/OkHttp e Windows Rust/Core Audio/GSMTC/clipboard/SendInput. Não há simulações no produto.
 
+## Release 0.6.10-kotlin — ciclo de vida, transferência e limites de entrada, 26/10/2026
+
+- `versionCode` 610, `versionName` `0.6.10-kotlin`, pacote `com.pcremote.nativeandroid`. Origem: revisão `a5b8afe10c9dea6912799eac115e1f2e036953db`.
+- `testDebugUnitTest --rerun-tasks --no-daemon --console=plain`: sucesso; **177 testes em 25 suítes**, zero falhas, erros ou ignorados. A reexecução forçada confirmou as saídas, sem reutilizar resultados anteriores.
+- `assembleDebug assembleRelease lintDebug lintRelease --no-daemon --console=plain`: sucesso, saída 0; 89 tarefas, 2 executadas e 87 já atualizadas. Lint: **zero erros**, 31 avisos em debug e 32 em release.
+- `aapt dump badging` confirmou versionCode 610, versionName `0.6.10-kotlin`, pacote `com.pcremote.nativeandroid`, minSdk 24 e targetSdk 36. `DebugInviteReceiver` está ausente no manifesto release e presente no debug.
+- APK universal de release: **772661 bytes**, SHA-256 `4b2537c8737248975a603d7ef54fc9fa9d8e157aa20650386c5ad81e72be7363`. `apksigner verify --verbose --print-certs` confirmou assinatura v2 e certificado de avaliação SHA-256 `70c09aad2f64bd4a0ff345b63347b7c27c776bc0d52d8b23f9db5a04ac74aa32`, igual ao das versões anteriores.
+- Assets em `release-assets/0.6.10/`: `pc-remote-android-kotlin-0.6.10-evaluation.apk` e `KOTLIN-SHA256SUMS-0.6.10.txt`.
+- Esta rodada validou compilação, testes JVM, lint, metadados e assinatura. Não houve teste de interface em emulador ou celular físico.
+- Evidências locais ignoradas pelo Git em `artifacts/release-0.6.10/`: logs Gradle dos testes e da revalidação de build/lint, relatórios de lint e contagens JUnit. A primeira tentativa combinada não capturou o exit code Gradle porque o destino inicial do `Tee-Object` ainda não existia; ela retornou erro de caminho no shell. As tarefas de build/lint foram depois revalidadas com o caminho correto e saída 0; os testes foram executados novamente com `--rerun-tasks`.
+
 ## Release 0.6.9-kotlin — fallback de transporte e mensagens, 24/10/2026
 
 - `versionCode` 609, `versionName` `0.6.9-kotlin`. `testDebugUnitTest compileDebugKotlin`: sucesso; **174 testes em 25 suítes**, zero falhas/erros/ignorados. Regressões adicionadas para planejamento de múltiplos endereços (mDNS + manual), fallback determinístico após recusa e mensagens sem menção indevida a firewall quando a porta respondeu recusando a conexão.

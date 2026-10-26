@@ -68,6 +68,8 @@ internal interface Screen {
   fun render(state: UiState)
   /** The Activity paused: release anything that should not outlive the visit, such as the microphone. */
   fun pause() {}
+  /** The Activity is being destroyed: stop timers and callbacks that would keep it alive. */
+  fun destroy() {}
   /** True while this screen intercepts hardware volume keys (e.g. Presentation Remote slide stepping). */
   fun interceptsVolumeKeys(): Boolean = false
   fun onVolumeKey(up: Boolean) {}
